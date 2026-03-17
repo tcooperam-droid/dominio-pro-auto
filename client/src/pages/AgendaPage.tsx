@@ -593,21 +593,24 @@ export default function AgendaPage() {
           {/* Chip de data + ícone calendário com Popover */}
           <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
             <PopoverTrigger asChild>
-              <div className="flex items-center gap-1.5 min-w-0 px-2.5 py-1 rounded-lg bg-white/90 cursor-pointer hover:bg-white transition-colors">
-                <span className="text-xs md:text-sm font-semibold text-gray-900 capitalize truncate max-w-[140px] md:max-w-none">
+              <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg bg-gradient-to-r from-primary/15 to-primary/5 border border-primary/40 cursor-pointer hover:border-primary/70 hover:from-primary/20 hover:to-primary/10 transition-all shadow-sm">
+                <span className="text-xs md:text-sm font-bold text-primary capitalize truncate max-w-[140px] md:max-w-none">
                   {formattedDate}
                 </span>
-                <Calendar className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                <Calendar className="w-4 h-4 text-primary flex-shrink-0" />
               </div>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0 bg-white shadow-lg" align="start">
-              <div className="p-3 bg-white">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-bold text-foreground">Selecionar Data</p>
+            <PopoverContent className="w-auto p-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700 shadow-2xl rounded-xl" align="start">
+              <div className="p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Selecione a Data</p>
+                    <p className="text-lg font-bold text-white mt-1">{format(parseISO(selectedDate), "MMMM yyyy", { locale: ptBR })}</p>
+                  </div>
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 text-[10px] font-bold uppercase tracking-wider"
+                    className="h-8 px-3 text-xs font-bold uppercase tracking-wider bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 rounded-md"
                     onClick={() => {
                       setSelectedDate(format(new Date(), "yyyy-MM-dd"));
                       setShowDatePicker(false);
@@ -616,20 +619,23 @@ export default function AgendaPage() {
                     Hoje
                   </Button>
                 </div>
-                <CalendarUI
-                  mode="single"
-                  selected={parseISO(selectedDate)}
-                  onSelect={(date) => {
-                    if (date) {
-                      const newDate = format(date, "yyyy-MM-dd");
-                      setSelectedDate(newDate);
-                      setShowDatePicker(false);
-                    }
-                  }}
-                  locale={ptBR}
-                  initialFocus
-                  disabled={(date) => false}
-                />
+                <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                  <CalendarUI
+                    mode="single"
+                    selected={parseISO(selectedDate)}
+                    onSelect={(date) => {
+                      if (date) {
+                        const newDate = format(date, "yyyy-MM-dd");
+                        setSelectedDate(newDate);
+                        setShowDatePicker(false);
+                      }
+                    }}
+                    locale={ptBR}
+                    initialFocus
+                    disabled={(date) => false}
+                    className="[&_.rdp]:text-white [&_.rdp-caption]:text-white [&_.rdp-head_cell]:text-slate-300 [&_.rdp-cell]:text-white [&_.rdp-day]:text-white [&_.rdp-day_selected]:bg-primary [&_.rdp-day_selected]:text-white [&_.rdp-day_today]:border-primary [&_.rdp-button:hover]:bg-slate-700 [&_.rdp-button]:text-white"
+                  />
+                </div>
               </div>
             </PopoverContent>
           </Popover>
