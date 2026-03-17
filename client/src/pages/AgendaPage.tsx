@@ -241,10 +241,13 @@ const EmployeeColumn = memo(function EmployeeColumn({
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    const totalMinutes = (y / HOUR_HEIGHT) * 60 + startHour * 60;
-    const snapped = snapToGrid(totalMinutes, snapMinutes);
-    const hour = Math.floor(snapped / 60);
-    const minute = snapped % 60;
+    // Calcula os minutos desde o início do dia baseado na posição Y
+    const minutesFromStart = (y / HOUR_HEIGHT) * 60;
+    // Arredonda para o snap mais próximo
+    const snappedMinutes = snapToGrid(minutesFromStart, snapMinutes);
+    // Calcula hora e minuto corretamente
+    const hour = startHour + Math.floor(snappedMinutes / 60);
+    const minute = snappedMinutes % 60;
     onColumnClick(employee.id, hour, minute);
   }, [employee.id, onColumnClick, startHour, snapMinutes]);
 
@@ -481,60 +484,80 @@ export default function AgendaPage() {
     const onUp = async (e: PointerEvent) => {
       if (!dragging) return;
 
-      const targetEmpId = getEmpAtX(e.clientX);
-      if (!targetEmpId) {
-        setDragging(null);
-        return;
-      }
-
-      const rect = gridRef.current?.querySelector<HTMLElement>(`[data-emp-id="${targetEmpId}"]`)?.getBoundingClientRect();
-      if (!rect) {
-        setDragging(null);
-        return;
-      }
-
-      const y = e.clientY - rect.top;
-      const totalMinutes = (y / HOUR_HEIGHT) * 60 + START_HOUR * 60;
-      const snapped = snapToGrid(totalMinutes, SNAP_MINUTES);
-      const hour = Math.floor(snapped / 60);
-      const minute = snapped % 60;
-
-      const newStart = new Date(currentDate);
-      newStart.setHours(hour, minute, 0, 0);
-      const duration = (new Date(dragging.endTime).getTime() - new Date(dragging.startTime).getTime()) / 1000 / 60;
-      const newEnd = new Date(newStart.getTime() + duration * 60_000);
-
-      // Atualiza cache local imediatamente
-      appointmentsStore.updateLocal(dragging.id, {
-        employeeId: targetEmpId,
-        startTime: newStart.toISOString(),
-        endTime: newEnd.toISOString(),
-      });
-      setRefreshKey(k => k + 1);
-
-      // Persiste no Supabase em background
       try {
-        await appointmentsStore.move(dragging.id, targetEmpId, newStart.toISOString(), newEnd.toISOString());
-        toast.success("Agendamento reagendado!");
-      } catch {
-        toast.error("Erro ao mover — revertendo");
-        // Reverte: restaura posição original no cache
+        const targetEmpId = getEmpAtX(e.clientX);
+        if (!targetEmpId) {
+          setDragging(null);
+          setDragOverEmpId(null);
+          return;
+        }
+
+        const rect = gridRef.current?.querySelector<HTMLElement>(`[data-emp-id="${targetEmpId}"]`)?.getBoundingClientRect();
+        if (!rect) {
+          setDragging(null);
+          setDragOverEmpId(null);
+          return;
+        }
+
+        const y = e.clientY - rect.top;
+        // Calcula os minutos desde o início do dia baseado na posição Y
+        const minutesFromStart = (y / HOUR_HEIGHT) * 60;
+        // Arredonda para o snap mais próximo
+        const snappedMinutes = snapToGrid(minutesFromStart, SNAP_MINUTES);
+        // Calcula hora e minuto corretamente
+        const hour = START_HOUR + Math.floor(snappedMinutes / 60);
+        const minute = snappedMinutes % 60;
+
+        const newStart = new Date(currentDate);
+        newStart.setHours(hour, minute, 0, 0);
+        const duration = (new Date(dragging.endTime).getTime() - new Date(dragging.startTime).getTime()) / 1000 / 60;
+        const newEnd = new Date(newStart.getTime() + duration * 60_000);
+
+        // Atualiza cache local imediatamente
         appointmentsStore.updateLocal(dragging.id, {
-          employeeId: dragging.employeeId,
-          startTime: dragging.startTime,
-          endTime: dragging.endTime,
+          employeeId: targetEmpId,
+          startTime: newStart.toISOString(),
+          endTime: newEnd.toISOString(),
         });
         setRefreshKey(k => k + 1);
+
+        // Persiste no Supabase em background
+        try {
+          await appointmentsStore.move(dragging.id, targetEmpId, newStart.toISOString(), newEnd.toISOString());
+          toast.success("Agendamento reagendado!");
+        } catch {
+          toast.error("Erro ao mover — revertendo");
+          // Reverte: restaura posição original no cache
+          appointmentsStore.updateLocal(dragging.id, {
+            employeeId: dragging.employeeId,
+            startTime: dragging.startTime,
+            endTime: dragging.endTime,
+          });
+          setRefreshKey(k => k + 1);
+        }
+      } finally {
+        // SEMPRE limpa o estado de drag ao final, mesmo se houver erro
+        setDragging(null);
+        setDragOverEmpId(null);
       }
+    };
+
+    const onCancel = () => {
+      setDragging(null);
+      setDragOverEmpId(null);
     };
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    document.addEventListener("pointerleave", onCancel);
     return () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      document.removeEventListener("pointerleave", onCancel);
     };
-  }, [dragging, getEmpAtX, START_HOUR, END_HOUR, SNAP_MINUTES]);
+  }, [dragging, getEmpAtX, START_HOUR, END_HOUR, SNAP_MINUTES, currentDate];
 
   // ── Drag start ────────────────────────────────────────────────────────────
   const handleDragStart = useCallback((appt: Appointment, y: number, x: number) => {
