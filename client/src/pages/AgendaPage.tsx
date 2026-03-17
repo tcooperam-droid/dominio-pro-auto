@@ -9,7 +9,8 @@ import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Plus, Calendar, CalendarDays, RefreshCw, Clock, Link2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Calendar, CalendarDays, RefreshCw, Clock, Link2, Search } from "lucide-react";
+import { Calendar as CalendarUI } from "@/components/ui/calendar";
 import AppointmentModal from "@/components/AppointmentModal";
 import { cn } from "@/lib/utils";
 import {
@@ -612,45 +613,50 @@ export default function AgendaPage() {
 
             {/* Calendário popup */}
             {showDatePicker && (
-              <div style={{
-                position: "fixed",
-                zIndex: 99999,
-                top: (() => {
-                  const el = datePickerRef.current;
-                  if (el) return el.getBoundingClientRect().bottom + 6;
-                  return 60;
-                })(),
-                left: (() => {
-                  const el = datePickerRef.current;
-                  if (el) return Math.min(el.getBoundingClientRect().left, window.innerWidth - 260);
-                  return 8;
-                })(),
-                background: "var(--card)",
-                border: "1px solid var(--border)",
-                borderRadius: 14,
-                padding: 12,
-                boxShadow: "0 20px 60px rgba(0,0,0,0.7)",
-                minWidth: 240,
-              }}>
-                <p className="text-xs font-semibold text-foreground mb-2">Ir para data</p>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  autoFocus
-                  onChange={e => {
-                    if (e.target.value) {
-                      setSelectedDate(e.target.value);
+              <div
+                className="fixed z-[99999] bg-card border border-border rounded-xl p-3 shadow-2xl min-w-[280px]"
+                style={{
+                  top: (() => {
+                    const el = datePickerRef.current;
+                    if (el) return el.getBoundingClientRect().bottom + 8;
+                    return 80;
+                  })(),
+                  left: (() => {
+                    const el = datePickerRef.current;
+                    if (el) return Math.min(el.getBoundingClientRect().left, window.innerWidth - 300);
+                    return 20;
+                  })()
+                }}
+              >
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <p className="text-sm font-bold text-foreground">Selecionar Data</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-[10px] font-bold uppercase tracking-wider"
+                    onClick={() => {
+                      setSelectedDate(format(new Date(), "yyyy-MM-dd"));
                       setShowDatePicker(false);
-                    }
-                  }}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                />
-                <button
-                  onClick={() => { setSelectedDate(format(new Date(), "yyyy-MM-dd")); setShowDatePicker(false); }}
-                  className="w-full mt-2 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-                >
-                  Hoje
-                </button>
+                    }}
+                  >
+                    Hoje
+                  </Button>
+                </div>
+                <div className="bg-background/50 rounded-lg border border-border/50 overflow-hidden">
+                  <CalendarUI
+                    mode="single"
+                    selected={parseISO(selectedDate)}
+                    onSelect={(date) => {
+                      if (date) {
+                        setSelectedDate(format(date, "yyyy-MM-dd"));
+                        setShowDatePicker(false);
+                      }
+                    }}
+                    locale={ptBR}
+                    initialFocus
+                    className="p-2"
+                  />
+                </div>
               </div>
             )}
           </div>
