@@ -253,6 +253,26 @@ export const clientsStore = {
     window.dispatchEvent(new Event("clients_updated"));
     return client;
   },
+  async createMany(data: Omit<Client, "id" | "createdAt">[]): Promise<void> {
+    // Supabase suporta inserção em lote. Dividimos em blocos de 100 para segurança.
+    const chunkSize = 100;
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.slice(i, i + chunkSize).map(c => ({
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        birth_date: c.birthDate,
+        cpf: c.cpf,
+        address: c.address,
+        notes: c.notes
+      }));
+      const { error } = await supabase.from("clients").insert(chunk);
+      if (error) throw error;
+    }
+    // Recarrega o cache após a inserção em lote
+    await this.fetchAll();
+    window.dispatchEvent(new Event("clients_updated"));
+  },
   async update(id: number, data: Partial<Client>): Promise<Client | null> {
     const p: any = {};
     if (data.name !== undefined) p.name = data.name;
