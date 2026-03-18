@@ -239,9 +239,22 @@ export const servicesStore = {
 export const clientsStore = {
   list(): Client[] { return [...cache.clients]; },
   async fetchAll(): Promise<Client[]> {
-    const { data, error } = await supabase.from("clients").select("*").order("name");
-    if (error) throw error;
-    cache.clients = (data ?? []).map(toClient);
+    // Supabase tem limite de 1000 registros por query — busca em páginas para suportar cadastros grandes
+    const pageSize = 1000;
+    let page = 0;
+    let all: any[] = [];
+    while (true) {
+      const { data, error } = await supabase
+        .from("clients")
+        .select("*")
+        .order("name")
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+      if (error) throw error;
+      all = all.concat(data ?? []);
+      if ((data ?? []).length < pageSize) break;
+      page++;
+    }
+    cache.clients = all.map(toClient);
     return cache.clients;
   },
   async create(data: Omit<Client, "id" | "createdAt">): Promise<Client> {
