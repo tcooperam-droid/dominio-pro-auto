@@ -106,7 +106,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
     e.stopPropagation();
-    didDrag.current = false;
+    didDrag.current = false;  // zera aqui, não no pointerup
     dragReady.current = false;
     pointerStart.current = { y: e.clientY, x: e.clientX };
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -146,7 +146,8 @@ const AppointmentBlock = memo(function AppointmentBlock({
 
   const handlePointerUp = useCallback(() => {
     cancelLongPress();
-    didDrag.current = false;
+    // Não zera didDrag.current aqui — o onClick do React dispara DEPOIS do pointerup
+    // e precisa checar se houve drag. Zeramos no próximo pointerdown.
   }, [cancelLongPress]);
 
   return (
@@ -155,7 +156,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={cancelLongPress}
-      onClick={(e) => { e.stopPropagation(); if (!didDrag.current && !dragReady.current) onClick(); }}
+      onClick={(e) => { e.stopPropagation(); if (!didDrag.current) onClick(); }}
       style={{
         position: "absolute",
         top: `${top}px`,
@@ -499,7 +500,9 @@ export default function AgendaPage() {
           return;
         }
 
-        const y = e.clientY - rect.top;
+        // Desconta scroll da grade para posição precisa
+        const scrollTop = gridRef.current?.scrollTop ?? 0;
+        const y = e.clientY - rect.top + scrollTop;
         // Calcula os minutos desde o início do dia baseado na posição Y
         const minutesFromStart = (y / HOUR_HEIGHT) * 60;
         // Arredonda para o snap mais próximo
