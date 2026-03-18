@@ -319,6 +319,9 @@ export default function FerramentasClientesPage() {
       toast.success(`${importPreview.length} cliente(s) importado(s) com sucesso!`);
       setImportModalOpen(false);
       setImportPreview([]);
+      // Resetar ambos os inputs para permitir reimportar o mesmo arquivo
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      if (vcfInputRef.current) vcfInputRef.current.value = "";
       refresh();
     } catch (err: any) {
       const msg = err?.message || err?.error_description || JSON.stringify(err) || "Erro desconhecido";
