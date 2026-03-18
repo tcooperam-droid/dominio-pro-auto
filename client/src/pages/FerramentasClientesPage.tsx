@@ -315,12 +315,8 @@ export default function FerramentasClientesPage() {
   const handleImportConfirm = async () => {
     setImporting(true);
     try {
-      let created = 0;
-      for (const c of importPreview) {
-        await clientsStore.create(c);
-        created++;
-      }
-      toast.success(`${created} cliente(s) importado(s) com sucesso!`);
+      await clientsStore.createMany(importPreview);
+      toast.success(`${importPreview.length} cliente(s) importado(s) com sucesso!`);
       setImportModalOpen(false);
       setImportPreview([]);
       refresh();
