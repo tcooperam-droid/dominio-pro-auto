@@ -103,7 +103,7 @@ export default function ClientesPage() {
       }
 
       // Processa cada contato selecionado
-      let addedCount = 0;
+      const toAdd: Omit<Client, "id" | "createdAt">[] = [];
       for (const contact of contacts) {
         const name = contact.name?.[0] || "";
         const phone = contact.tel?.[0] || "";
@@ -114,25 +114,21 @@ export default function ClientesPage() {
         // Verifica se o cliente ja existe
         const exists = clients.some(c => c.name.toLowerCase() === name.toLowerCase());
         if (!exists) {
-          try {
-            await clientsStore.create({
-              name: name.trim(),
-              phone: phone || null,
-              email: email || null,
-              birthDate: null,
-              cpf: null,
-              address: null,
-              notes: null,
-            });
-            addedCount++;
-          } catch (err) {
-            console.error(`Erro ao adicionar ${name}:`, err);
-          }
+          toAdd.push({
+            name: name.trim(),
+            phone: phone || null,
+            email: email || null,
+            birthDate: null,
+            cpf: null,
+            address: null,
+            notes: null,
+          });
         }
       }
 
-      if (addedCount > 0) {
-        toast.success(`${addedCount} contato(s) importado(s) com sucesso!`);
+      if (toAdd.length > 0) {
+        await clientsStore.createMany(toAdd);
+        toast.success(`${toAdd.length} contato(s) importado(s) com sucesso!`);
         setRefreshKey(k => k + 1);
       } else {
         toast.info("Todos os contatos ja estao cadastrados");
