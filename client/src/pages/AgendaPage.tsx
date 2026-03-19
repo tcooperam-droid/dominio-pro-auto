@@ -415,8 +415,9 @@ export default function AgendaPage() {
   const [dragging, setDragging]           = useState<Appointment | null>(null);
   const [dragPos, setDragPos]             = useState({ x: 0, y: 0 });
   const [dragOverEmpId, setDragOverEmpId] = useState<number | null>(null);
-  const dragStartY  = useRef(0);
-  const dragStartX  = useRef(0);
+  const dragStartY   = useRef(0);
+  const dragStartX   = useRef(0);
+  const dragOffsetY  = useRef(0); // offset do toque dentro do bloco arrastado
   const gridRef     = useRef<HTMLDivElement>(null);
 
   const employees = useMemo(() => employeesStore.list(true), [refreshKey]);
@@ -490,7 +491,8 @@ export default function AgendaPage() {
           return;
         }
 
-        const y = e.clientY - rect.top;
+        // Subtrai o offset interno para alinhar ao topo do bloco, não ao dedo
+        const y = e.clientY - rect.top - dragOffsetY.current;
         // Calcula os minutos desde o início do dia baseado na posição Y
         const minutesFromStart = (y / HOUR_HEIGHT) * 60;
         // Arredonda para o snap mais próximo
@@ -556,7 +558,20 @@ export default function AgendaPage() {
     setDragPos({ x, y });
     dragStartY.current = y;
     dragStartX.current = x;
-  }, []);
+
+    // Calcula o offset interno: quantos pixels abaixo do topo do bloco o usuário tocou
+    // Isso serve para que ao soltar, o horário reflita o topo do bloco, não o dedo
+    const apptStart = new Date(appt.startTime);
+    const empCol = gridRef.current?.querySelector<HTMLElement>(`[data-emp-id="${appt.employeeId}"]`);
+    if (empCol) {
+      const colRect = empCol.getBoundingClientRect();
+      const yInCol = y - colRect.top;
+      const apptTopInCol = timeToPixels(apptStart, START_HOUR);
+      dragOffsetY.current = yInCol - apptTopInCol;
+    } else {
+      dragOffsetY.current = 0;
+    }
+  }, [START_HOUR]);
 
   // ── Modal helpers ─────────────────────────────────────────────────────────
   const openNew = useCallback((empId: number, hour: number, minute = 0) => {
