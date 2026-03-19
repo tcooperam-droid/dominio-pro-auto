@@ -140,7 +140,7 @@ export default function CaixaPage() {
 
   // KPIs do caixa atual
   const totalRevenue       = entries.reduce((s, e) => s + e.amount, 0);
-  const totalMaterialCosts = entries.reduce((s, e) => s + (e.materialCostValue ?? 0), 0);
+  const totalMaterialCosts = entries.reduce((s, e) => s + ((e as any).materialCostValue ?? 0), 0);
   const totalCommissions   = entries.reduce((s, e) => s + e.commissionValue, 0);
   const netRevenue         = totalRevenue - totalMaterialCosts - totalCommissions;
   const openingBal       = toNum(currentSession?.openingBalance);
