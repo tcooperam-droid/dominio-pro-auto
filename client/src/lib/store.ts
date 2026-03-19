@@ -28,6 +28,7 @@ export interface Service {
   description: string | null;
   durationMinutes: number;
   price: number;
+  materialCostPercent: number; // % do valor do serviço descontado antes da comissão
   color: string;
   active: boolean;
   createdAt: string;
@@ -51,6 +52,7 @@ export interface AppointmentService {
   price: number;
   durationMinutes: number;
   color: string;
+  materialCostPercent: number; // copiado do serviço no momento do agendamento
 }
 
 export interface Appointment {
@@ -91,6 +93,7 @@ export interface CashEntry {
   paymentMethod: "dinheiro" | "cartao_credito" | "cartao_debito" | "pix" | "outro";
   commissionPercent: number;
   commissionValue: number;
+  materialCostValue: number;
   isAutoLaunch: boolean;
   createdAt: string;
 }
@@ -115,7 +118,7 @@ function toEmployee(r: any): Employee {
   return { id: r.id, name: r.name, email: r.email ?? "", phone: r.phone ?? "", color: r.color ?? "#ec4899", photoUrl: r.photo_url ?? null, specialties: r.specialties ?? [], commissionPercent: Number(r.commission_percent ?? 0), workingHours: r.working_hours ?? {}, active: r.active ?? true, createdAt: r.created_at };
 }
 function toService(r: any): Service {
-  return { id: r.id, name: r.name, description: r.description ?? null, durationMinutes: r.duration_minutes ?? 60, price: Number(r.price ?? 0), color: r.color ?? "#ec4899", active: r.active ?? true, createdAt: r.created_at };
+  return { id: r.id, name: r.name, description: r.description ?? null, durationMinutes: r.duration_minutes ?? 60, price: Number(r.price ?? 0), materialCostPercent: Number(r.material_cost_percent ?? 0), color: r.color ?? "#ec4899", active: r.active ?? true, createdAt: r.created_at };
 }
 function toClient(r: any): Client {
   return { id: r.id, name: r.name, email: r.email ?? null, phone: r.phone ?? null, birthDate: r.birth_date ?? null, cpf: r.cpf ?? null, address: r.address ?? null, notes: r.notes ?? null, createdAt: r.created_at };
@@ -127,7 +130,7 @@ function toCashSession(r: any): CashSession {
   return { id: r.id, openedAt: r.opened_at, closedAt: r.closed_at ?? null, openingBalance: Number(r.opening_balance ?? 0), totalRevenue: r.total_revenue != null ? Number(r.total_revenue) : null, totalCommissions: r.total_commissions != null ? Number(r.total_commissions) : null, closingNotes: r.closing_notes ?? null, status: r.status };
 }
 function toCashEntry(r: any): CashEntry {
-  return { id: r.id, sessionId: r.session_id, appointmentId: r.appointment_id ?? null, clientName: r.client_name ?? "", employeeId: r.employee_id, description: r.description ?? "", amount: Number(r.amount ?? 0), paymentMethod: r.payment_method ?? "dinheiro", commissionPercent: Number(r.commission_percent ?? 0), commissionValue: Number(r.commission_value ?? 0), isAutoLaunch: r.is_auto_launch ?? false, createdAt: r.created_at };
+  return { id: r.id, sessionId: r.session_id, appointmentId: r.appointment_id ?? null, clientName: r.client_name ?? "", employeeId: r.employee_id, description: r.description ?? "", amount: Number(r.amount ?? 0), paymentMethod: r.payment_method ?? "dinheiro", commissionPercent: Number(r.commission_percent ?? 0), commissionValue: Number(r.commission_value ?? 0), materialCostValue: Number(r.material_cost_value ?? 0), isAutoLaunch: r.is_auto_launch ?? false, createdAt: r.created_at };
 }
 function toAuditLog(r: any): AuditLog {
   return { id: r.id, entityType: r.entity_type, entityId: r.entity_id, action: r.action, description: r.description, userName: r.user_name ?? null, createdAt: r.created_at };
@@ -209,7 +212,7 @@ export const servicesStore = {
     return cache.services;
   },
   async create(data: Omit<Service, "id" | "createdAt">): Promise<Service> {
-    const { data: row, error } = await supabase.from("services").insert({ name: data.name, description: data.description, duration_minutes: data.durationMinutes, price: data.price, color: data.color, active: data.active }).select().single();
+    const { data: row, error } = await supabase.from("services").insert({ name: data.name, description: data.description, duration_minutes: data.durationMinutes, price: data.price, material_cost_percent: data.materialCostPercent ?? 0, color: data.color, active: data.active }).select().single();
     if (error) throw error;
     const svc = toService(row);
     cache.services.push(svc);
@@ -222,6 +225,7 @@ export const servicesStore = {
     if (data.description !== undefined) p.description = data.description;
     if (data.durationMinutes !== undefined) p.duration_minutes = data.durationMinutes;
     if (data.price !== undefined) p.price = data.price;
+    if (data.materialCostPercent !== undefined) p.material_cost_percent = data.materialCostPercent;
     if (data.color !== undefined) p.color = data.color;
     if (data.active !== undefined) p.active = data.active;
     const { data: row, error } = await supabase.from("services").update(p).eq("id", id).select().single();
@@ -450,7 +454,7 @@ export const cashEntriesStore = {
     return cache.cashEntries;
   },
   async create(data: Omit<CashEntry, "id" | "createdAt">): Promise<CashEntry> {
-    const { data: row, error } = await supabase.from("cash_entries").insert({ session_id: data.sessionId, appointment_id: data.appointmentId, client_name: data.clientName, employee_id: data.employeeId, description: data.description, amount: data.amount, payment_method: data.paymentMethod, commission_percent: data.commissionPercent, commission_value: data.commissionValue, is_auto_launch: data.isAutoLaunch }).select().single();
+    const { data: row, error } = await supabase.from("cash_entries").insert({ session_id: data.sessionId, appointment_id: data.appointmentId, client_name: data.clientName, employee_id: data.employeeId, description: data.description, amount: data.amount, payment_method: data.paymentMethod, commission_percent: data.commissionPercent, commission_value: data.commissionValue, material_cost_value: data.materialCostValue ?? 0, is_auto_launch: data.isAutoLaunch }).select().single();
     if (error) throw error;
     const entry = toCashEntry(row);
     cache.cashEntries.push(entry);
@@ -502,7 +506,14 @@ async function autoLaunchCashEntry(appt: Appointment): Promise<void> {
   if (!emp) return; // Funcionário não encontrado
 
   const amount = toNum(appt.totalPrice);
-  const commissionValue = amount * (emp.commissionPercent / 100);
+  // Desconta custo de material (soma de todos os serviços do agendamento)
+  const materialCostValue = (appt.services ?? []).reduce((sum, s) => {
+    const svcPrice = s.price ?? 0;
+    const costPct  = s.materialCostPercent ?? 0;
+    return sum + (svcPrice * costPct / 100);
+  }, 0);
+  const baseForCommission = Math.max(0, amount - materialCostValue);
+  const commissionValue = baseForCommission * (emp.commissionPercent / 100);
   const services = (appt.services ?? []).map(s => s.name).join(", ") || "Serviço";
 
   // Cria entrada automática no caixa
@@ -516,6 +527,7 @@ async function autoLaunchCashEntry(appt: Appointment): Promise<void> {
     paymentMethod: "dinheiro", // Padrão: dinheiro
     commissionPercent: emp.commissionPercent,
     commissionValue,
+    materialCostValue,
     isAutoLaunch: true,
   });
 
@@ -595,7 +607,11 @@ export async function autoCloseCashAtMidnight(): Promise<void> {
       const emp = cache.employees.find(e => e.id === appt.employeeId);
       if (!emp) continue;
       const amount = Number(appt.totalPrice ?? 0);
-      const commissionValue = amount * (emp.commissionPercent / 100);
+      const materialCostValue = (appt.services ?? []).reduce((sum, s) => {
+        return sum + ((s.price ?? 0) * (s.materialCostPercent ?? 0) / 100);
+      }, 0);
+      const baseForCommission = Math.max(0, amount - materialCostValue);
+      const commissionValue = baseForCommission * (emp.commissionPercent / 100);
       const services = (appt.services ?? []).map(s => s.name).join(", ") || "Serviço";
       await cashEntriesStore.create({
         sessionId:         session.id,
@@ -607,14 +623,16 @@ export async function autoCloseCashAtMidnight(): Promise<void> {
         paymentMethod:     "dinheiro",
         commissionPercent: emp.commissionPercent,
         commissionValue,
+        materialCostValue,
         isAutoLaunch:      true,
       });
     }
 
     // Recalcula totais com todos os lançamentos (incluindo os recém-criados)
     const entries = cashEntriesStore.list(session.id);
-    const totalRevenue     = entries.reduce((s, e) => s + e.amount, 0);
-    const totalCommissions = entries.reduce((s, e) => s + e.commissionValue, 0);
+    const totalRevenue      = entries.reduce((s, e) => s + e.amount, 0);
+    const totalCommissions  = entries.reduce((s, e) => s + e.commissionValue, 0);
+    const totalMaterialCosts = entries.reduce((s, e) => s + e.materialCostValue, 0);
 
     await cashSessionsStore.close(session.id, {
       totalRevenue,
