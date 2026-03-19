@@ -261,8 +261,10 @@ export default function ConfiguracoesPage() {
           {/* Seletor de tema */}
           <div className="space-y-3">
             <Label>Tema do app</Label>
+
+            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">🌙 Escuros</p>
             <div className="grid grid-cols-2 gap-2">
-              {THEME_PALETTES.map(t => (
+              {THEME_PALETTES.filter(t => t.dark).map(t => (
                 <button key={t.id} type="button"
                   onClick={() => {
                     updateConfig("themeId", t.id);
@@ -273,12 +275,40 @@ export default function ConfiguracoesPage() {
                   className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition-all text-left"
                   style={{
                     backgroundColor: t.bg,
-                    borderColor: config.themeId === t.id ? t.accent : "transparent",
+                    borderColor: config.themeId === t.id ? t.accent : "rgba(255,255,255,0.1)",
                     boxShadow: config.themeId === t.id ? `0 0 12px ${t.accent}50` : "none",
                   }}>
-                  <div className="w-6 h-6 rounded-full flex-shrink-0"
-                    style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}88)` }} />
+                  <div className="w-5 h-5 rounded-full flex-shrink-0"
+                    style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}66)` }} />
                   <span className="text-xs font-semibold" style={{ color: config.themeId === t.id ? t.accent : "#fff" }}>
+                    {t.name}
+                  </span>
+                  {config.themeId === t.id && (
+                    <span className="ml-auto text-xs" style={{ color: t.accent }}>✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide mt-2">☀️ Claros</p>
+            <div className="grid grid-cols-2 gap-2">
+              {THEME_PALETTES.filter(t => !t.dark).map(t => (
+                <button key={t.id} type="button"
+                  onClick={() => {
+                    updateConfig("themeId", t.id);
+                    updateConfig("accentColor", t.accent);
+                    applyAccentColor(t.accent);
+                    updateConfig("bgType", "default");
+                  }}
+                  className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition-all text-left"
+                  style={{
+                    backgroundColor: t.bg,
+                    borderColor: config.themeId === t.id ? t.accent : "rgba(0,0,0,0.12)",
+                    boxShadow: config.themeId === t.id ? `0 0 12px ${t.accent}40` : "none",
+                  }}>
+                  <div className="w-5 h-5 rounded-full flex-shrink-0"
+                    style={{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent}66)` }} />
+                  <span className="text-xs font-semibold" style={{ color: t.textColor }}>
                     {t.name}
                   </span>
                   {config.themeId === t.id && (
