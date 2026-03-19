@@ -61,6 +61,93 @@ function loadBackground(): React.CSSProperties {
   return {};
 }
 
+// ─── Paletas de tema ─────────────────────────────────────
+export const THEME_PALETTES = [
+  {
+    id: "rosa-neon",
+    name: "Rosa Neon",
+    accent: "#ec4899",
+    bg: "#0d0d14",
+    surface: "rgba(15,15,28,0.95)",
+    card: "rgba(20,20,35,0.9)",
+    border: "rgba(255,255,255,0.07)",
+  },
+  {
+    id: "roxo-galaxy",
+    name: "Roxo Galaxy",
+    accent: "#8b5cf6",
+    bg: "#0c0818",
+    surface: "rgba(14,10,28,0.95)",
+    card: "rgba(20,15,40,0.9)",
+    border: "rgba(255,255,255,0.07)",
+  },
+  {
+    id: "esmeralda",
+    name: "Esmeralda",
+    accent: "#10b981",
+    bg: "#060f0c",
+    surface: "rgba(8,18,14,0.95)",
+    card: "rgba(10,24,18,0.9)",
+    border: "rgba(255,255,255,0.07)",
+  },
+  {
+    id: "dourado",
+    name: "Dourado Premium",
+    accent: "#f59e0b",
+    bg: "#0e0c08",
+    surface: "rgba(18,14,8,0.95)",
+    card: "rgba(24,18,10,0.9)",
+    border: "rgba(255,255,255,0.07)",
+  },
+  {
+    id: "azul-oceano",
+    name: "Azul Oceano",
+    accent: "#0ea5e9",
+    bg: "#060d18",
+    surface: "rgba(8,16,30,0.95)",
+    card: "rgba(10,22,40,0.9)",
+    border: "rgba(255,255,255,0.07)",
+  },
+  {
+    id: "coral",
+    name: "Coral Sunset",
+    accent: "#f97316",
+    bg: "#0f0808",
+    surface: "rgba(20,10,10,0.95)",
+    card: "rgba(28,14,14,0.9)",
+    border: "rgba(255,255,255,0.07)",
+  },
+  {
+    id: "aurora",
+    name: "Aurora",
+    accent: "#8b5cf6",
+    bg: "#0d0820",
+    surface: "rgba(14,10,30,0.92)",
+    card: "rgba(255,255,255,0.06)",
+    border: "rgba(255,255,255,0.10)",
+  },
+  {
+    id: "claro",
+    name: "Claro Minimal",
+    accent: "#ec4899",
+    bg: "#f0f0f8",
+    surface: "rgba(255,255,255,0.95)",
+    card: "rgba(255,255,255,0.95)",
+    border: "rgba(0,0,0,0.08)",
+  },
+];
+
+function loadPalette() {
+  try {
+    const s = localStorage.getItem("salon_config");
+    if (s) {
+      const c = JSON.parse(s);
+      if (c.themeId) return THEME_PALETTES.find(p => p.id === c.themeId) ?? THEME_PALETTES[0];
+    }
+  } catch { /* ignore */ }
+  return THEME_PALETTES[0];
+}
+
 function getAccent(): string {
   try {
     const s = localStorage.getItem("salon_config");
@@ -103,12 +190,14 @@ export default function DominioLayout({ children, onNewAppt }: {
   const [branding, setBranding] = useState(loadBranding);
   const [bgStyle, setBgStyle] = useState(loadBackground);
   const [accent, setAccent] = useState(getAccent);
+  const [palette, setPalette] = useState(loadPalette);
 
   useEffect(() => {
     const onUpdate = () => {
       setBranding(loadBranding());
       setBgStyle(loadBackground());
       setAccent(getAccent());
+      setPalette(loadPalette());
     };
     window.addEventListener("salon_config_updated", onUpdate);
     return () => window.removeEventListener("salon_config_updated", onUpdate);
@@ -123,7 +212,7 @@ export default function DominioLayout({ children, onNewAppt }: {
     location === path || location.startsWith(path + "/");
 
   return (
-    <div className="flex h-screen overflow-hidden" style={bgStyle}>
+    <div className="flex h-screen overflow-hidden" style={Object.keys(bgStyle).length > 0 ? bgStyle : { backgroundColor: palette.bg }}>
 
       {/* ── Overlay mobile ── */}
       {sidebarOpen && (
@@ -138,10 +227,10 @@ export default function DominioLayout({ children, onNewAppt }: {
         "w-64",
         sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
       )} style={{
-        background: "rgba(10,10,18,0.92)",
+        background: palette.surface,
         backdropFilter: "blur(32px)",
         WebkitBackdropFilter: "blur(32px)",
-        borderRight: "1px solid rgba(255,255,255,0.07)",
+        borderRight: `1px solid ${palette.border}`,
       }}>
 
         {/* Brand */}
@@ -252,7 +341,7 @@ export default function DominioLayout({ children, onNewAppt }: {
         {/* Topbar */}
         <header className="flex-shrink-0 flex items-center gap-3 px-4 py-3"
           style={{
-            background: "rgba(10,10,18,0.7)",
+            background: palette.surface.replace("0.95", "0.80"),
             backdropFilter: "blur(20px)",
             WebkitBackdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.06)",
@@ -322,7 +411,7 @@ export default function DominioLayout({ children, onNewAppt }: {
         {/* ── Bottom Navigation — mobile only ── */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 pb-safe"
           style={{
-            background: "rgba(8,8,16,0.95)",
+            background: palette.surface,
             backdropFilter: "blur(32px)",
             WebkitBackdropFilter: "blur(32px)",
             borderTop: "1px solid rgba(255,255,255,0.08)",
