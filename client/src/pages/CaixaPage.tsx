@@ -131,7 +131,7 @@ export default function CaixaPage() {
     const apptsSinceOpen = appointmentsStore.list({ startDate: sessionStart });
     const launchedIds = new Set(entries.filter(e => e.appointmentId).map(e => e.appointmentId!));
     return apptsSinceOpen.filter(a =>
-      !["cancelled"].includes(a.status) &&
+      ["completed", "in_progress"].includes(a.status) &&
       !launchedIds.has(a.id) &&
       toNum(a.totalPrice) > 0
     );
