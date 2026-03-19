@@ -128,7 +128,8 @@ export default function CaixaPage() {
   const launchableAppts = useMemo(() => {
     if (!currentSession) return [];
     const sessionStart = currentSession.openedAt.slice(0, 10); // "yyyy-MM-dd"
-    const apptsSinceOpen = appointmentsStore.list({ startDate: sessionStart });
+    // endDate = hoje para não incluir agendamentos futuros
+    const apptsSinceOpen = appointmentsStore.list({ startDate: sessionStart, endDate: today });
     const launchedIds = new Set(entries.filter(e => e.appointmentId).map(e => e.appointmentId!));
     return apptsSinceOpen.filter(a =>
       ["completed", "in_progress"].includes(a.status) &&
