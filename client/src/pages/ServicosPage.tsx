@@ -18,11 +18,11 @@ const COLORS = ["#ec4899", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"
 
 interface ServiceForm {
   name: string; description: string; durationMinutes: number;
-  price: string; color: string; active: boolean;
+  price: string; materialCostPercent: string; color: string; active: boolean;
 }
 
 const defaultForm = (): ServiceForm => ({
-  name: "", description: "", durationMinutes: 60, price: "", color: COLORS[0], active: true,
+  name: "", description: "", durationMinutes: 60, price: "", materialCostPercent: "0", color: COLORS[0], active: true,
 });
 
 export default function ServicosPage() {
@@ -41,7 +41,9 @@ export default function ServicosPage() {
     setForm({
       name: svc.name, description: svc.description ?? "",
       durationMinutes: svc.durationMinutes,
-      price: String(svc.price.toFixed(2)), color: svc.color, active: svc.active,
+      price: String(svc.price.toFixed(2)),
+      materialCostPercent: String(svc.materialCostPercent ?? 0),
+      color: svc.color, active: svc.active,
     });
     setModalOpen(true);
   };
@@ -54,6 +56,7 @@ export default function ServicosPage() {
       const payload = {
         name: form.name.trim(), description: form.description || null,
         durationMinutes: form.durationMinutes, price: parseFloat(form.price),
+        materialCostPercent: parseFloat(form.materialCostPercent) || 0,
         color: form.color, active: form.active,
       };
       if (editingId) {
@@ -125,6 +128,11 @@ export default function ServicosPage() {
                   <div className="flex items-center gap-1 text-sm font-bold text-primary">
                     <DollarSign className="w-3.5 h-3.5" />R$ {svc.price.toFixed(2)}
                   </div>
+                  {svc.materialCostPercent > 0 && (
+                    <div className="flex items-center gap-1 text-xs text-amber-400">
+                      <span>Custo mat.: {svc.materialCostPercent}%</span>
+                    </div>
+                  )}
                   {!svc.active && <Badge variant="secondary" className="text-[10px] ml-auto">Inativo</Badge>}
                 </div>
               </CardContent>
@@ -155,6 +163,12 @@ export default function ServicosPage() {
                 <Label>Preço (R$) *</Label>
                 <Input type="number" min="0" step="0.01" value={form.price} onChange={e => setForm(p => ({ ...p, price: e.target.value }))} placeholder="0.00" />
               </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Custo de material (%)
+                <span className="ml-1 text-xs text-muted-foreground font-normal">— descontado antes da comissão</span>
+              </Label>
+              <Input type="number" min="0" max="100" step="0.5" value={form.materialCostPercent} onChange={e => setForm(p => ({ ...p, materialCostPercent: e.target.value }))} placeholder="0" />
             </div>
             <div className="space-y-2">
               <Label>Cor</Label>
