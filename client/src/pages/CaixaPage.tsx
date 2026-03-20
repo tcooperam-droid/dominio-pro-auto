@@ -273,6 +273,19 @@ export default function CaixaPage() {
     }
   };
 
+  const handleReopenSession = async (sessionId: number) => {
+    if (!confirm("Reabrir este caixa para edição? O caixa atual precisará estar fechado.")) return;
+    try {
+      await cashSessionsStore.reopen(sessionId);
+      await cashEntriesStore.fetchAll();
+      setHistoryOpen(false);
+      setRefreshKey(k => k + 1);
+      toast.success("Caixa reaberto! Faça as correções e feche novamente.");
+    } catch (err: any) {
+      toast.error(err?.message ?? "Erro ao reabrir caixa");
+    }
+  };
+
   const handleDeleteEntry = async (id: number) => {
     if (!confirm("Excluir este lançamento?")) return;
     try {
@@ -1105,7 +1118,15 @@ export default function CaixaPage() {
                           líquido R$ {(toNum(session.totalRevenue) - toNum(session.totalCommissions)).toFixed(2)}
                         </p>
                       </div>
-                      <Badge variant="secondary" className="text-[10px]">Fechado</Badge>
+                      <div className="flex flex-col items-end gap-1">
+                        <Badge variant="secondary" className="text-[10px]">Fechado</Badge>
+                        <button
+                          onClick={() => handleReopenSession(session.id)}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 font-medium transition-colors"
+                        >
+                          ↩ Reabrir
+                        </button>
+                      </div>
                     </div>
                     {session.closingNotes && (
                       <div className="px-3 py-2 border-t border-border bg-background/30">
