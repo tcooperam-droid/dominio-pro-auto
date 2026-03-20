@@ -5,13 +5,14 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
+import { getSession, clearSession, MENU_VISIBILITY, isAccessControlEnabled } from "@/lib/access";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/contexts/ThemeContext";
 import {
   Calendar, Users, UserCheck, Scissors, DollarSign,
   BarChart2, Settings, History, Database, Menu, X,
   Sun, Moon, Plus, Search, ChevronRight, Wrench,
-  CalendarCheck, Bell,
+  CalendarCheck, Bell, LogOut,
 } from "lucide-react";
 
 // ─── Navegação ────────────────────────────────────────────
@@ -266,6 +267,37 @@ export default function DominioLayout({ children, onNewAppt }: {
   const [accent, setAccent] = useState(getAccent);
   const [palette, setPalette] = useState(loadPalette);
 
+  // ── Acesso ─────────────────────────────────────────────
+  const session = getSession();
+  const role = session?.role ?? "owner";
+  const menuVis = MENU_VISIBILITY[role];
+  const accessEnabled = isAccessControlEnabled();
+
+  // Navs filtrados por perfil
+  const visiblePrimaryNav = PRIMARY_NAV.filter(n => {
+    const key = n.path.replace("/", "") || "dashboard";
+    return menuVis[key] !== false;
+  });
+  const visibleSecondaryNav = SECONDARY_NAV.filter(n => {
+    const key = n.path.replace("/", "").split("/")[0];
+    const keyMap: Record<string,string> = {
+      "funcionarios": "funcionarios",
+      "servicos": "servicos",
+      "ferramentas-clientes": "ferramentas",
+      "caixa": "caixa",
+      "relatorios": "relatorios",
+      "historico": "historico",
+      "backup": "backup",
+      "configuracoes": "configuracoes",
+    };
+    return menuVis[keyMap[key] ?? key] !== false;
+  });
+
+  const handleLogout = () => {
+    clearSession();
+    window.location.reload();
+  };
+
   useEffect(() => {
     const onUpdate = () => {
       setBranding(loadBranding());
@@ -339,7 +371,7 @@ export default function DominioLayout({ children, onNewAppt }: {
           <p style={{ fontSize: 10, color: palette.textMuted, letterSpacing: "0.2em", padding: "0 8px 8px" }}>
             PRINCIPAL
           </p>
-          {PRIMARY_NAV.map(({ path, label, icon: Icon }) => {
+          {visiblePrimaryNav.map(({ path, label, icon: Icon }) => {
             const active = isActive(path);
             return (
               <button key={path} onClick={() => navigate(path)}
@@ -374,7 +406,7 @@ export default function DominioLayout({ children, onNewAppt }: {
             <p style={{ fontSize: 10, color: palette.textMuted, letterSpacing: "0.2em", padding: "0 8px 8px" }}>
               GESTÃO
             </p>
-            {SECONDARY_NAV.map(({ path, label, icon: Icon }) => {
+            {visibleSecondaryNav.map(({ path, label, icon: Icon }) => {
               const active = isActive(path);
               return (
                 <button key={path} onClick={() => navigate(path)}
@@ -403,6 +435,14 @@ export default function DominioLayout({ children, onNewAppt }: {
               className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-white/30 hover:text-white/60 hover:bg-white/5 transition-all">
               {theme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
               <span>{theme === "dark" ? "Tema claro" : "Tema escuro"}</span>
+            </button>
+          )}
+          {accessEnabled && session && (
+            <button onClick={handleLogout}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition-all hover:bg-white/5 mb-1"
+              style={{ color: palette.textMuted }}>
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sair ({session.profileName})</span>
             </button>
           )}
           <p style={{ fontSize: 10, color: palette.textMuted, textAlign: "center", marginTop: 8 }}>
@@ -493,7 +533,7 @@ export default function DominioLayout({ children, onNewAppt }: {
             borderTop: "1px solid rgba(255,255,255,0.08)",
           }}>
           <div className="flex items-center justify-around px-2 py-2">
-            {PRIMARY_NAV.map(({ path, label, icon: Icon }) => {
+            {visiblePrimaryNav.map(({ path, label, icon: Icon }) => {
               const active = isActive(path);
               return (
                 <button key={path} onClick={() => navigate(path)}
