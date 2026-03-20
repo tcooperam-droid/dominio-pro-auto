@@ -430,6 +430,22 @@ export const cashSessionsStore = {
     await addAuditLog("cash_session", session.id, "create", `Caixa aberto com saldo R$ ${openingBalance.toFixed(2)}${customDate ? ` (data: ${customDate})` : ""}`);
     return session;
   },
+  async reopen(id: number): Promise<CashSession | null> {
+    // Verifica se já há outro caixa aberto
+    const current = cache.cashSessions.find(s => s.status === "open");
+    if (current && current.id !== id) throw new Error("Feche o caixa atual antes de reabrir outro.");
+    const { data: row, error } = await supabase
+      .from("cash_sessions")
+      .update({ status: "open", closed_at: null, total_revenue: null, total_commissions: null, closing_notes: null })
+      .eq("id", id).select().single();
+    if (error) throw error;
+    const session = toCashSession(row);
+    const idx = cache.cashSessions.findIndex(s => s.id === id);
+    if (idx !== -1) cache.cashSessions[idx] = session;
+    await addAuditLog("cash_session", id, "update", `Caixa #${id} reaberto para correção`);
+    window.dispatchEvent(new Event("store_updated"));
+    return session;
+  },
   async close(id: number, data: { totalRevenue: number; totalCommissions: number; closingNotes: string }): Promise<CashSession | null> {
     const { data: row, error } = await supabase.from("cash_sessions").update({ closed_at: new Date().toISOString(), total_revenue: data.totalRevenue, total_commissions: data.totalCommissions, closing_notes: data.closingNotes, status: "closed" }).eq("id", id).select().single();
     if (error) throw error;
