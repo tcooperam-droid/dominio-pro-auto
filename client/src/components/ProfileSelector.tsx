@@ -57,7 +57,6 @@ function ProfileCard({ emoji, label, sublabel, accent, selected, onClick }: Prof
 export default function ProfileSelector() {
   const accent = getAccent();
   const salonName = getSalonName();
-  const cfg = loadAccessConfig();
   const [, setLocation] = useLocation();
 
   const [selected, setSelected] = useState<UserRole | null>(null);
@@ -65,10 +64,11 @@ export default function ProfileSelector() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const _cfg = loadAccessConfig();
   const profiles: { role: UserRole; emoji: string; label: string; sublabel: string; enabled: boolean }[] = [
     { role: "owner", emoji: "👑", label: "Dono", sublabel: "Acesso total", enabled: true },
-    { role: "manager", emoji: "👔", label: cfg.managerName || "Gerente", sublabel: "Acesso total", enabled: cfg.managerEnabled },
-    { role: "employee", emoji: "✂️", label: "Funcionário", sublabel: "Agenda e clientes", enabled: cfg.employeesAccessEnabled },
+    { role: "manager", emoji: "👔", label: _cfg.managerName || "Gerente", sublabel: "Acesso total", enabled: _cfg.managerEnabled },
+    { role: "employee", emoji: "✂️", label: "Funcionário", sublabel: "Agenda e clientes", enabled: _cfg.employeesAccessEnabled },
   ].filter(p => p.enabled);
 
   const handleSelect = (role: UserRole) => {
@@ -83,17 +83,20 @@ export default function ProfileSelector() {
     setError("");
 
     setTimeout(() => {
+      const cfg = loadAccessConfig();
+      // Recarrega cfg sempre na hora do login para pegar valor mais recente
+      const freshCfg = loadAccessConfig();
       let correctPassword = "";
       let profileName = "";
 
       if (selected === "owner") {
-        correctPassword = cfg.ownerPassword;
+        correctPassword = freshCfg.ownerPassword;
         profileName = "Dono";
       } else if (selected === "manager") {
-        correctPassword = cfg.managerPassword;
-        profileName = cfg.managerName || "Gerente";
+        correctPassword = freshCfg.managerPassword;
+        profileName = freshCfg.managerName || "Gerente";
       } else {
-        correctPassword = cfg.employeePassword;
+        correctPassword = freshCfg.employeePassword;
         profileName = "Funcionário";
       }
 
