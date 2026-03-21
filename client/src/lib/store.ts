@@ -352,8 +352,8 @@ export const appointmentsStore = {
     cache.appointments.push(appt);
     await addAuditLog("appointment", appt.id, "create", `Agendamento para "${appt.clientName}" criado`);
 
-    // AUTO-LAUNCH: Se criado já como completed, lança no caixa imediatamente
-    if (appt.status === "completed" && toNum(appt.totalPrice) > 0) {
+    // AUTO-LAUNCH: Lança no caixa ao criar, exceto cancelados e no_show
+    if (!["cancelled", "no_show"].includes(appt.status) && toNum(appt.totalPrice) > 0) {
       try {
         await autoLaunchCashEntry(appt);
       } catch (e) {
@@ -386,12 +386,21 @@ export const appointmentsStore = {
     if (idx !== -1) cache.appointments[idx] = appt;
     await addAuditLog("appointment", id, "update", `Agendamento #${id} atualizado`);
     
-    // AUTO-LAUNCH: Se status muda para "completed", cria entrada no caixa automaticamente
-    if (data.status === "completed" && previousStatus !== "completed" && toNum(appt.totalPrice) > 0) {
-      try {
-        await autoLaunchCashEntry(appt);
-      } catch (e) {
-        console.error("Erro ao criar lançamento automático:", e);
+    // AUTO-LAUNCH: Lança no caixa se status mudou para não-cancelado e ainda não foi lançado
+    if (
+      data.status !== undefined &&
+      !["cancelled", "no_show"].includes(data.status) &&
+      (previousStatus === "scheduled" || previousStatus === "confirmed") &&
+      toNum(appt.totalPrice) > 0
+    ) {
+      // Verifica se já existe lançamento para este agendamento
+      const alreadyLaunched = cache.cashEntries.some(e => e.appointmentId === appt.id);
+      if (!alreadyLaunched) {
+        try {
+          await autoLaunchCashEntry(appt);
+        } catch (e) {
+          console.error("Erro ao criar lançamento automático:", e);
+        }
       }
     }
     
