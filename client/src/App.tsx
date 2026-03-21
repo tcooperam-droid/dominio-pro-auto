@@ -39,11 +39,11 @@ function AppContent() {
   const [location]                = useLocation();
   const accent = getAccent();
 
-  // ── Controle de acesso ───────────────────────────────
+  // ── Controle de acesso — todos os hooks ANTES de qualquer return ──
   const [accessEnabled, setAccessEnabled] = useState(isAccessControlEnabled);
-  const [session, setSession] = useState(getSession);
+  const [session, setSession]             = useState(getSession);
 
-  // Revalida acesso quando salon_config muda (ex: senha configurada)
+  // Revalida quando salon_config muda
   useEffect(() => {
     const onUpdate = () => {
       setAccessEnabled(isAccessControlEnabled());
@@ -57,22 +57,18 @@ function AppContent() {
     };
   }, []);
 
-  // Se controle ativado e sem sessão → mostrar seletor
-  if (!loading && accessEnabled && !session) {
-    return <ProfileSelector />;
-  }
+  // Redireciona se rota bloqueada (via useEffect para não atualizar durante render)
+  useEffect(() => {
+    if (session && accessEnabled && !canAccess(session.role, location)) {
+      setLocation(getDefaultRoute(session.role));
+    }
+  }, [session, accessEnabled, location, setLocation]);
 
-  // Se tem sessão mas tenta acessar rota bloqueada → redirecionar
-  if (session && accessEnabled && !canAccess(session.role, location)) {
-    setLocation(getDefaultRoute(session.role));
-    return null;
-  }
-
+  // Carrega dados do Supabase
   useEffect(() => {
     fetchAllData()
       .then(async () => {
         setLoading(false);
-        // Abertura automática do caixa ao iniciar o app
         try {
           const opened = await autoOpenCashIfNeeded();
           if (opened) {
@@ -96,6 +92,13 @@ function AppContent() {
     setLocation("/agenda");
     setTimeout(() => window.dispatchEvent(new CustomEvent("dominio:open_new_appt")), 100);
   }, [setLocation]);
+
+  // ── Renderização condicional APÓS todos os hooks ──
+
+  // Se controle ativado e sem sessão → mostrar seletor de perfil
+  if (!loading && accessEnabled && !session) {
+    return <ProfileSelector />;
+  }
 
   if (loading) return (
     <div className="flex items-center justify-center h-screen" style={{ background: "#08080f" }}>
