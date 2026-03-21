@@ -99,16 +99,8 @@ export default function CaixaPage() {
       setRefreshKey(k => k + 1);
       toast.success("Lançamento automático criado!");
     };
-    const onAutoClosed = () => {
-      setRefreshKey(k => k + 1);
-      toast.info("Caixa fechado automaticamente à meia-noite.");
-    };
     window.addEventListener("cash_entry_auto_launched", onAutoLaunch);
-    window.addEventListener("cash_session_auto_closed", onAutoClosed);
-    return () => {
-      window.removeEventListener("cash_entry_auto_launched", onAutoLaunch);
-      window.removeEventListener("cash_session_auto_closed", onAutoClosed);
-    };
+    return () => window.removeEventListener("cash_entry_auto_launched", onAutoLaunch);
   }, []);
 
   // ── Dados ──
@@ -132,7 +124,7 @@ export default function CaixaPage() {
     const apptsSinceOpen = appointmentsStore.list({ startDate: sessionStart, endDate: today });
     const launchedIds = new Set(entries.filter(e => e.appointmentId).map(e => e.appointmentId!));
     return apptsSinceOpen.filter(a =>
-      ["completed", "in_progress"].includes(a.status) &&
+      !["cancelled", "no_show"].includes(a.status) &&
       !launchedIds.has(a.id) &&
       toNum(a.totalPrice) > 0
     );
