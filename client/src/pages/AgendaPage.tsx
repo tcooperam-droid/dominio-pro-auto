@@ -418,13 +418,6 @@ export default function AgendaPage() {
     return () => window.removeEventListener("salon_config_updated", onUpdate);
   }, []);
 
-  // Reactiva a agenda quando o agente cria/edita/cancela agendamentos
-  useEffect(() => {
-    const onApptUpdated = () => setRefreshKey(k => k + 1);
-    window.addEventListener("appointments_updated", onApptUpdated);
-    return () => window.removeEventListener("appointments_updated", onApptUpdated);
-  }, []);
-
   // Drag state
   const [dragging, setDragging]           = useState<Appointment | null>(null);
   const [dragPos, setDragPos]             = useState({ x: 0, y: 0 });
