@@ -269,7 +269,7 @@ export default function FerramentasClientesPage() {
 
     // 1. Reatribuir agendamentos primeiro (Evita órfãos)
     const allAppts = appointmentsStore.list({});
-    const apptsToUpdate = allAppts.filter(a => removeIds.includes(a.clientId));
+    const apptsToUpdate = allAppts.filter(a => a.clientId != null && removeIds.includes(a.clientId));
     
     await Promise.all(apptsToUpdate.map(a => 
       appointmentsStore.update(a.id, { clientId: keep.id, clientName: keep.name })

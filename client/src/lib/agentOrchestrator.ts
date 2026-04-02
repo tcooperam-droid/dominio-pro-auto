@@ -339,7 +339,11 @@ export async function handleUserMessage(userMessage: string): Promise<AgentRespo
   // Se é follow-up, herdar entidades do tópico ativo que não foram mencionadas
   if (followUp.isFollowUp) {
     const topicEntities = getRelevantEntities(0.2);
-    entities = { ...topicEntities, ...resolvedRefs, ...entities };
+    const definedRefs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(resolvedRefs)) {
+      if (v !== undefined) definedRefs[k] = v;
+    }
+    entities = { ...topicEntities, ...definedRefs, ...entities };
   }
 
   // ─── 4. Registrar turno do usuário ──────────────────────
