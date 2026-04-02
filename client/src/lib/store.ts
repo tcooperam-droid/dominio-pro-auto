@@ -580,6 +580,7 @@ export const appointmentsStore = {
     cache.appointments.push(appt);
     logDb("appointments.create:success", appt);
     await addAuditLog("appointment", appt.id, "create", `Agendamento para "${appt.clientName}" criado`);
+    window.dispatchEvent(new Event("appointments_updated"));
     return appt;
   },
   async update(id: number, data: Partial<Appointment>): Promise<Appointment | null> {
@@ -611,12 +612,14 @@ export const appointmentsStore = {
     }
     
     await addAuditLog("appointment", id, "update", `Agendamento #${id} atualizado`);
+    window.dispatchEvent(new Event("appointments_updated"));
     return appt;
   },
   async delete(id: number): Promise<void> {
     await supabase.from("appointments").delete().eq("id", id);
     cache.appointments = cache.appointments.filter(a => a.id !== id);
     await addAuditLog("appointment", id, "delete", `Agendamento #${id} removido`);
+    window.dispatchEvent(new Event("appointments_updated"));
   },
 
   /** Atualiza o cache local imediatamente (sem bater no Supabase).
@@ -933,4 +936,3 @@ export async function fetchDashboardData(): Promise<{ clientCount: number }> {
   const clientCount = countResult.count ?? (cache as any).clients.length;
   return { clientCount };
 }
-
