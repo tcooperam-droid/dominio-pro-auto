@@ -55,26 +55,15 @@ function AppContent() {
       typeof window !== "undefined" &&
       ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-    // Em produção (Vercel), o proxy /api/llm já tem o token via env var.
-    // Só precisa de token local do navegador em desenvolvimento (localhost).
-    let token = localStorage.getItem("github_token") || "";
-    if (!token && isLocalhost) {
-      token = window.prompt(
-        "Configure seu GitHub Token para ativar o Agente IA (apenas desenvolvimento local):\n" +
-        "Acesse: github.com/settings/tokens → Fine-grained → Models: Read"
-      ) || "";
-      if (token.trim()) {
-        localStorage.setItem("github_token", token.trim());
-        token = token.trim();
-      }
-    }
+    // Em produção (Vercel), o proxy /api/llm já tem o token via env var NEXT_PUBLIC_GITHUB_TOKEN.
+    // Em localhost, usa token salvo no localStorage ou VITE_GITHUB_TOKEN do .env.local.
+    const token = localStorage.getItem("github_token")
+      || (isLocalhost ? (import.meta.env.VITE_GITHUB_TOKEN ?? "") : "proxy");
 
-    // Em produção sem token local, usar "proxy" como sentinel
-    if (!token && !isLocalhost) {
-      token = "proxy";
+    if (!token) {
+      console.warn("[App] Agente IA não ativado — configure o token em Configurações.");
+      return;
     }
-
-    if (!token) return;
 
     try {
       let salonName = "Domínio Pro";
