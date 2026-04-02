@@ -16,13 +16,14 @@ export default async function handler(
   // Resolve token: header from client → env var fallback
   const token =
     (req.headers["x-github-token"] as string | undefined) ||
+    process.env.NEXT_PUBLIC_GITHUB_TOKEN ||
     process.env.GITHUB_TOKEN ||
     "";
 
   if (!token) {
     return res.status(401).json({
       error:
-        "Token não configurado. Defina GITHUB_TOKEN nas variáveis de ambiente do Vercel ou envie x-github-token no header.",
+        "Token não configurado. Defina NEXT_PUBLIC_GITHUB_TOKEN nas variáveis de ambiente do Vercel ou envie x-github-token no header.",
     });
   }
 
