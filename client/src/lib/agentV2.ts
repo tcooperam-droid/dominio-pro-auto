@@ -314,7 +314,8 @@ function getApptsByDate(dateStr: string): string {
 async function getClientWithHistory(query: string): Promise<string> {
   const q = query.trim();
   if (!q) {
-    const total = await clientsStore.count();
+    let total = 0;
+    try { total = await clientsStore.count(); } catch { /* Supabase indisponível */ }
     return `Total clientes: ${total}`;
   }
 
@@ -326,7 +327,8 @@ async function getClientWithHistory(query: string): Promise<string> {
   }
 
   if (found.length === 0) {
-    const total = await clientsStore.count();
+    let total = 0;
+    try { total = await clientsStore.count(); } catch { /* Supabase indisponível */ }
     return `Nenhum cliente encontrado com "${query}". Total no sistema: ${total}.`;
   }
 
@@ -454,7 +456,8 @@ async function gatherData(msg: string): Promise<string> {
     const searchTerm = candidateNames.join(" ");
     parts.push(await getClientWithHistory(searchTerm));
   } else {
-    const total = await clientsStore.count();
+    let total = 0;
+    try { total = await clientsStore.count(); } catch { /* Supabase indisponível */ }
     parts.push(`Total clientes cadastrados: ${total}. Use busca por nome para localizar.`);
   }
 
@@ -842,6 +845,8 @@ export function initAgentV2(config: AgentV2Config): void {
 export async function handleMessageV2(userMessage: string): Promise<AgentV2Response> {
   if (!cfg) return { text: "Agente não configurado." };
 
+  try {
+
   const msgTrimmed = userMessage.trim();
 
   // ── 1. Verificar ação pendente (conflito ou profissional) ──
@@ -864,12 +869,20 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   // ── 3. Fluxo normal: LLM + execução de ação ──
   addToHistory("user", msgTrimmed);
   const history = loadHistory().slice(0, -1);
-  const systemData = await gatherData(msgTrimmed);
+  let systemData = "(dados indisponíveis)";
+  try {
+    systemData = await gatherData(msgTrimmed);
+  } catch (err) {
+    console.warn("[agentV2] gatherData falhou, prosseguindo sem dados:", err);
+  }
+
+  console.log("[agentV2] gatherData OK, chamando LLM...");
 
   let raw: string;
   try {
     raw = await callLLM(buildSystemPrompt(cfg), history, msgTrimmed, systemData, cfg);
   } catch (err) {
+    console.warn("[agentV2] callLLM falhou:", err);
     const errText = `Erro: ${err instanceof Error ? err.message : "Tente novamente."}`;
     return { text: errText };
   }
@@ -917,6 +930,11 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   addToHistory("assistant", text);
   const msgId = `m_${Date.now()}`;
   return { text, actionExecuted, navigateTo, messageId: msgId, userMessage: msgTrimmed };
+
+  } catch (outerErr) {
+    console.error("[agentV2] Erro inesperado em handleMessageV2:", outerErr);
+    return { text: `Erro inesperado: ${outerErr instanceof Error ? outerErr.message : "Tente novamente."}` };
+  }
 }
 
 // ─── Handler de ações pendentes ───────────────────────────
