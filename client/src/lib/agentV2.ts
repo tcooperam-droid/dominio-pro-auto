@@ -314,9 +314,9 @@ function getApptsByDate(dateStr: string): string {
 async function getClientWithHistory(query: string): Promise<string> {
   const q = query.trim();
   if (!q) {
-    let total = 0;
-    try { total = await clientsStore.count(); } catch { /* Supabase indisponível */ }
-    return `Total clientes: ${total}`;
+    let totalStr = "(indisponível)";
+    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    return `Total clientes: ${totalStr}`;
   }
 
   let found: Awaited<ReturnType<typeof clientsStore.search>> = [];
@@ -327,9 +327,9 @@ async function getClientWithHistory(query: string): Promise<string> {
   }
 
   if (found.length === 0) {
-    let total = 0;
-    try { total = await clientsStore.count(); } catch { /* Supabase indisponível */ }
-    return `Nenhum cliente encontrado com "${query}". Total no sistema: ${total}.`;
+    let totalStr = "(indisponível)";
+    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    return `Nenhum cliente encontrado com "${query}". Total no sistema: ${totalStr}.`;
   }
 
   let recentAppointments: Appointment[] = [];
@@ -456,9 +456,9 @@ async function gatherData(msg: string): Promise<string> {
     const searchTerm = candidateNames.join(" ");
     parts.push(await getClientWithHistory(searchTerm));
   } else {
-    let total = 0;
-    try { total = await clientsStore.count(); } catch { /* Supabase indisponível */ }
-    parts.push(`Total clientes cadastrados: ${total}. Use busca por nome para localizar.`);
+    let totalStr = "(indisponível)";
+    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    parts.push(`Total clientes cadastrados: ${totalStr}. Use busca por nome para localizar.`);
   }
 
   // Se menciona data específica
