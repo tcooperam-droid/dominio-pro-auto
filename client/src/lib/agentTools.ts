@@ -1061,37 +1061,20 @@ export const tools: AgentTool[] = [
         };
       }
 
-      // ── 7. Criar agendamento (local-first) ──
-      // Insere no cache imediatamente para a agenda atualizar sem delay
-      const apptData = {
+      // ── 7. Criar agendamento ──
+      const appt = await appointmentsStore.create({
         clientName: client.name,
         clientId: client.id,
         employeeId,
         startTime,
         endTime,
-        status: "scheduled" as const,
+        status: "scheduled",
         totalPrice: totalPrice > 0 ? totalPrice : null,
         notes: params.observacoes ?? null,
-        paymentStatus: null as null,
-        groupId: null as null,
+        paymentStatus: null,
+        groupId: null,
         services,
-      };
-      const tempAppt = appointmentsStore.createLocal(apptData);
-
-      // Persiste no Supabase em background e substitui o temporário
-      appointmentsStore.create(apptData).then(realAppt => {
-        appointmentsStore.removeLocal(tempAppt.id);
-        // updateLocal nao funciona com id negativo, entao so garante o real no cache
-        // O cache ja tem o realAppt adicionado pelo create()
-        window.dispatchEvent(new Event("appointments_updated"));
-      }).catch(err => {
-        // Se falhou no Supabase, remove o temporário e avisa no console
-        appointmentsStore.removeLocal(tempAppt.id);
-        window.dispatchEvent(new Event("appointments_updated"));
-        console.error("[agentTools] Falha ao persistir agendamento:", err);
       });
-
-      const appt = tempAppt;
 
       // ── 8. Montar mensagem de sucesso com detalhes ──
       const horaStr = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
@@ -1478,3 +1461,4 @@ export function findToolByDescription(query: string): AgentTool | null {
   }
   return null;
 }
+
