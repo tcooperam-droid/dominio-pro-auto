@@ -18,7 +18,7 @@ import {
   appointmentsStore,
   cashEntriesStore,
 } from "./store";
-import { calcPeriodStats, getAppointmentsInPeriod, getPeriodDates } from "./analytics";
+import { calcPeriodStats, calcRevenueByEmployee, getAppointmentsInPeriod, getPeriodDates } from "./analytics";
 import type { ReportType } from "./agentScheduler";
 
 // ─── Helpers de periodo ────────────────────────────────────
@@ -75,12 +75,12 @@ function reportRendimentoBruto(scope: "dia" | "semana" | "mes" | "mes_anterior")
 
   if (stats.count > 0) {
     // Top funcionarios
-    const empRanking = stats.byEmployee
-      ?.sort((a: { revenue: number }, b: { revenue: number }) => b.revenue - a.revenue)
+    const empRanking = calcRevenueByEmployee(appts, employees)
+      .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 3);
-    if (empRanking && empRanking.length > 0) {
+    if (empRanking.length > 0) {
       lines.push(`\nTop funcionarios:`);
-      empRanking.forEach((e: { name: string; revenue: number; count: number }, i: number) => {
+      empRanking.forEach((e, i) => {
         lines.push(`  ${i + 1}. ${e.name}: R$ ${e.revenue.toFixed(2)} (${e.count} atend.)`);
       });
     }
@@ -99,7 +99,7 @@ function reportRendimentoLiquido(scope: "dia" | "semana" | "mes" | "mes_anterior
     `**Rendimento Liquido — ${label}**\n`,
     `Faturamento bruto: R$ ${stats.totalRevenue.toFixed(2)}`,
     `Comissoes: R$ ${stats.totalCommissions.toFixed(2)}`,
-    `Custos de material: R$ ${stats.totalMaterialCost.toFixed(2)}`,
+    `Custos de material: R$ ${stats.totalMaterial.toFixed(2)}`,
     `**Liquido: R$ ${stats.netRevenue.toFixed(2)}**`,
     `\nMargem: ${stats.totalRevenue > 0 ? ((stats.netRevenue / stats.totalRevenue) * 100).toFixed(1) : 0}%`,
   ];

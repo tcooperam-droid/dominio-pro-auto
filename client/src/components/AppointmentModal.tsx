@@ -475,7 +475,7 @@ export default function AppointmentModal({
                       // Count service frequency
                       const svcFreq = new Map<string, number>();
                       clientAppts.forEach(a => a.services?.forEach(s => svcFreq.set(s.name, (svcFreq.get(s.name) ?? 0) + 1)));
-                      const topServices = [...svcFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+                      const topServices = Array.from(svcFreq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
                       const lastEmp = employees.find(e => e.id === ultima.employeeId);
                       return (
                         <div className="p-2.5 rounded-lg bg-secondary/40 border border-border space-y-2">
@@ -530,6 +530,7 @@ export default function AppointmentModal({
                                   price: s.price,
                                   durationMinutes: s.durationMinutes,
                                   color: s.color,
+                                  materialCostPercent: s.materialCostPercent ?? 0,
                                 })));
                                 if (ultima.employeeId && !employeeId) {
                                   setEmployeeId(String(ultima.employeeId));

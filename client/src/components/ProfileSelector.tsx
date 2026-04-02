@@ -20,7 +20,11 @@ function getSalonName() {
   return "Domínio Pro";
 }
 
-export default function ProfileSelector() {
+interface ProfileSelectorProps {
+  onSelect?: (session: { role: UserRole; profileName: string; loginAt: number }) => void;
+}
+
+export default function ProfileSelector({ onSelect }: ProfileSelectorProps = {}) {
   const accent = getAccent();
   const salonName = getSalonName();
   const cfg = loadAccessConfig();
@@ -46,7 +50,12 @@ export default function ProfileSelector() {
 
     // Faz o login direto ignorando a senha
     setSession(selected, name);
-    window.location.href = getDefaultRoute(selected);
+
+    if (onSelect) {
+      onSelect({ role: selected, profileName: name, loginAt: Date.now() });
+    } else {
+      window.location.href = getDefaultRoute(selected);
+    }
   }
 
   return (

@@ -19,7 +19,7 @@ import BackupPage from "./pages/BackupPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 import FerramentasClientesPage from "./pages/FerramentasClientesPage";
 import { useState, useEffect } from "react";
-import { getSession, getDefaultRoute } from "./lib/access";
+import { getSession, getDefaultRoute, type Session } from "./lib/access";
 import ProfileSelector from "./components/ProfileSelector";
 import AgentChat from "./components/AgentChat";
 
@@ -51,40 +51,47 @@ function AppContent() {
 
   // ── INICIALIZAÇÃO DO AGENTE IA v2 ──
   useEffect(() => {
-    const setupIA = async () => {
-      let token = localStorage.getItem("github_token");
+    const isLocalhost =
+      typeof window !== "undefined" &&
+      ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-      if (!token) {
-        token = window.prompt(
-          "Configure seu GitHub Token para ativar o Agente IA:\n" +
-          "Acesse: github.com/settings/tokens → Fine-grained → Models: Read"
-        );
-        if (token?.trim()) {
-          localStorage.setItem("github_token", token.trim());
-          token = token.trim();
-        }
+    // Em produção (Vercel), o proxy /api/llm já tem o token via env var.
+    // Só precisa de token local do navegador em desenvolvimento (localhost).
+    let token = localStorage.getItem("github_token") || "";
+    if (!token && isLocalhost) {
+      token = window.prompt(
+        "Configure seu GitHub Token para ativar o Agente IA (apenas desenvolvimento local):\n" +
+        "Acesse: github.com/settings/tokens → Fine-grained → Models: Read"
+      ) || "";
+      if (token.trim()) {
+        localStorage.setItem("github_token", token.trim());
+        token = token.trim();
       }
+    }
 
-      if (!token) return;
+    // Em produção sem token local, usar "proxy" como sentinel
+    if (!token && !isLocalhost) {
+      token = "proxy";
+    }
 
+    if (!token) return;
+
+    try {
+      let salonName = "Domínio Pro";
       try {
-        let salonName = "Domínio Pro";
-        try {
-          const cfg = localStorage.getItem("salon_config");
-          if (cfg) salonName = JSON.parse(cfg).salonName || salonName;
-        } catch {}
+        const cfg = localStorage.getItem("salon_config");
+        if (cfg) salonName = JSON.parse(cfg).salonName || salonName;
+      } catch {}
 
-        initAgentV2({
-          apiToken: token,
-          model: "openai/gpt-4o-mini",
-          salonName,
-          businessContext: `${salonName} — Sistema de gestão para salões e barbearias.`,
-        });
-      } catch (err) {
-        console.error("Erro ao inicializar Agente IA:", err);
-      }
-    };
-    setupIA();
+      initAgentV2({
+        apiToken: token,
+        model: "openai/gpt-4o-mini",
+        salonName,
+        businessContext: `${salonName} — Sistema de gestão para salões e barbearias.`,
+      });
+    } catch (err) {
+      console.error("Erro ao inicializar Agente IA:", err);
+    }
   }, []);
 
   return (
