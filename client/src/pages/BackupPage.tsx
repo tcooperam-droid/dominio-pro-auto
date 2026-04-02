@@ -102,7 +102,7 @@ export default function BackupPage() {
           for (const e of data.employees) {
             await employeesStore.create({
               name: e.name, email: e.email ?? "", phone: e.phone ?? "",
-              color: e.color ?? "#ec4899", specialties: e.specialties ?? [],
+              color: e.color ?? "#ec4899", photoUrl: e.photoUrl ?? null, specialties: e.specialties ?? [],
               commissionPercent: e.commissionPercent ?? 0,
               workingHours: e.workingHours ?? {}, active: e.active ?? true,
             });
@@ -113,6 +113,7 @@ export default function BackupPage() {
             await servicesStore.create({
               name: s.name, description: s.description ?? null,
               durationMinutes: s.durationMinutes ?? 60, price: s.price ?? 0,
+              materialCostPercent: s.materialCostPercent ?? 0,
               color: s.color ?? "#ec4899", active: s.active ?? true,
             });
           }

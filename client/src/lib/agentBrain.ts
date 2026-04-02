@@ -532,8 +532,8 @@ export function generateSuggestions(): AgentSuggestion[] {
 export async function answerQuestionAsync(question: string): Promise<{ message: string; navigateTo?: string }> {
   try {
     const result = await handleUserMessage(question);
-    if (result.handled) {
-      return { message: result.text, navigateTo: result.navigateTo };
+    if (result.actionExecuted || result.text) {
+      return { message: result.text };
     }
   } catch {
     // Fallback

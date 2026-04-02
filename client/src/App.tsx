@@ -19,7 +19,7 @@ import BackupPage from "./pages/BackupPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 import FerramentasClientesPage from "./pages/FerramentasClientesPage";
 import { useState, useEffect } from "react";
-import { getSession, getDefaultRoute } from "./lib/access";
+import { getSession, getDefaultRoute, type Session } from "./lib/access";
 import ProfileSelector from "./components/ProfileSelector";
 import AgentChat from "./components/AgentChat";
 

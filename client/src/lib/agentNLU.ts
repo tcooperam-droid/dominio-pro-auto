@@ -384,6 +384,7 @@ export function getBestIntent(text: string): IntentScore | null {
 // ─── Entity Extraction ───────────────────────────────────
 
 export interface ExtractedEntities {
+  [key: string]: string | undefined;
   nome?: string;
   telefone?: string;
   email?: string;
