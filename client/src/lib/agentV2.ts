@@ -155,20 +155,8 @@ function timeToMinutes(t: string): number {
 
 function normalizeTime(raw: string): string | null {
   if (!raw) return null;
-  let t = raw
-    .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/min(utos?)?$/i, "")  // remove "min"/"minutos" suffix
-    .replace(/h(ora)?s?/gi, ":")   // 14h30 → 14:30, 14horas → 14:
-    .replace(/:+$/, "")            // trailing colon(s)
-    .replace(/:+/g, ":")           // collapse multiple colons
-    .trim();
-
-  // Handle ISO fragments like "14:00:00" → "14:00"
-  if (/^\d{1,2}:\d{2}:\d{2}$/.test(t)) {
-    t = t.slice(0, 5);
-  }
-
+  let t = raw.toLowerCase().replace(/h/gi, ":").replace(/\s+/g, "").trim();
+  t = t.replace(/:$/, "");
   if (/^\d{1,2}$/.test(t)) t = `${t.padStart(2, "0")}:00`;
   if (/^\d{1,2}:\d{2}$/.test(t)) {
     const [h, m] = t.split(":");
@@ -737,23 +725,14 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
     return `Cliente "${paramClientName ?? clientId}" não encontrado. Verifique o cadastro.`;
   }
 
-  // 2. Localizar serviço (opcional — se não informado, usa o primeiro ativo)
-  const allSvcs = servicesStore.list(true);
-  let svc = serviceId
-    ? allSvcs.find((s) => s.id === serviceId) ?? null
+  // 2. Localizar serviço
+  const svc = serviceId
+    ? servicesStore.list(true).find((s) => s.id === serviceId) ?? null
     : null;
-
-  // Se serviceId foi informado mas não encontrado, tente buscar por nome no params
-  if (!svc && serviceId) {
-    // serviceId inválido informado
-    if (allSvcs.length === 0) return "Nenhum serviço cadastrado no sistema.";
-    return `Serviço ID:${serviceId} não encontrado. Disponíveis: ${allSvcs.map((s) => `${s.name} (ID:${s.id})`).join(", ")}`;
-  }
-
-  // Se nenhum serviceId informado, usar primeiro serviço como padrão
   if (!svc) {
-    if (allSvcs.length === 0) return "Nenhum serviço cadastrado no sistema.";
-    svc = allSvcs[0];
+    const svcs = servicesStore.list(true);
+    if (svcs.length === 0) return "Nenhum serviço cadastrado no sistema.";
+    return `Serviço ID:${serviceId} não encontrado. Disponíveis: ${svcs.map((s) => `${s.name} (ID:${s.id})`).join(", ")}`;
   }
 
   // 3. Localizar profissional
@@ -913,22 +892,10 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   let actionExecuted = false;
   let navigateTo: string | undefined;
 
-  // Regex flexível: aceita ```action, ```json, ``` action, ou ``` seguido de JSON com type
-  const actionPatterns = [
-    /```\s*action\s*\n?([\s\S]*?)```/i,
-    /```\s*json\s*\n?([\s\S]*?)```/i,
-    /```\s*\n?(\{[\s\S]*?"type"\s*:[\s\S]*?\})\s*```/,
-  ];
-  let match: RegExpMatchArray | null = null;
-  for (const pattern of actionPatterns) {
-    match = raw.match(pattern);
-    if (match) break;
-  }
-
+  const match = raw.match(/```action\s*([\s\S]*?)```/);
   if (match) {
     try {
-      const act: ActionPayload = JSON.parse(match[1].trim());
-      console.log("[AgentV2] Ação extraída:", act);
+      const act: ActionPayload = JSON.parse(match[1]);
       const result = await executeAction(act);
 
       if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
