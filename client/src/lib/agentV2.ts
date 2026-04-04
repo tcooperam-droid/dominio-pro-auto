@@ -509,23 +509,29 @@ REGRAS:
 11. Quando o usuário perguntar sobre financeiro, use os dados financeiros fornecidos
 12. Se o caixa não estiver aberto, ALERTE o usuário
 
-AÇÕES — inclua ao final da resposta quando executar operação:
+FORMATO OBRIGATÓRIO DE RESPOSTA PARA AÇÕES:
+Quando tiver TODOS os dados necessários (clientId, serviceId, employeeId, date, time), sua resposta DEVE seguir este formato exato:
+
+[mensagem curta confirmando o que vai fazer]
+
 \`\`\`action
 {"type":"agendar","params":{"clientId":123,"clientName":"Nome","serviceId":45,"employeeId":2,"date":"hoje","time":"14:00"}}
 \`\`\`
-Tipos: agendar | cancelar | mover | concluir
-- agendar: {clientId, clientName, serviceId, employeeId, date, time}
-- cancelar: {appointmentId}
-- mover: {appointmentId, newDate, newTime}
-- concluir: {appointmentId}
 
-IMPORTANTE:
+Tipos disponíveis: agendar | cancelar | mover | concluir
+- agendar: requer {clientId, clientName, serviceId, employeeId, date, time}
+- cancelar: requer {appointmentId}
+- mover: requer {appointmentId, newDate, newTime}
+- concluir: requer {appointmentId}
+
+REGRAS CRÍTICAS DO BLOCO ACTION:
+- O bloco \`\`\`action deve aparecer SEMPRE ao final da resposta quando tiver todos os dados
+- O bloco deve conter JSON válido em UMA única linha
+- NUNCA omita o bloco action quando souber cliente, serviço, profissional, data e hora
+- NUNCA diga "agendado", "feito", "concluído" sem incluir o bloco action — o sistema executa a partir do bloco
+- Se faltar qualquer dado, pergunte ao usuário — NÃO inclua o bloco action
 - NÃO verifique conflitos — o SISTEMA faz isso automaticamente
-- SEMPRE inclua o bloco action quando tiver todos os dados
-- Se falta informação, pergunte o que falta — NÃO inclua action
-- NUNCA confirme operação antes do retorno do sistema
 - date pode ser: "hoje", "amanha", "DD/MM", dia da semana, ou YYYY-MM-DD
-- Inclua clientName além do clientId
 ${buildMemoryPrompt()}`;
 }
 
@@ -892,11 +898,20 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   let actionExecuted = false;
   let navigateTo: string | undefined;
 
+  // ── Logs de diagnóstico ──
+  console.group("[agentV2] Resposta do LLM");
+  console.log("Raw completo:", raw);
   const match = raw.match(/```action\s*([\s\S]*?)```/);
+  console.log("Bloco action encontrado?", !!match);
+  if (match) console.log("JSON do action:", match[1].trim());
+  console.groupEnd();
+
   if (match) {
     try {
       const act: ActionPayload = JSON.parse(match[1]);
+      console.log("[agentV2] Executando ação:", act);
       const result = await executeAction(act);
+      console.log("[agentV2] Resultado da ação:", result);
 
       if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
         const lista = result.replace("AGUARDANDO_PROFISSIONAL:", "");
