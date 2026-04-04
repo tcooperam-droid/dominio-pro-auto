@@ -509,29 +509,23 @@ REGRAS:
 11. Quando o usuário perguntar sobre financeiro, use os dados financeiros fornecidos
 12. Se o caixa não estiver aberto, ALERTE o usuário
 
-FORMATO OBRIGATÓRIO DE RESPOSTA PARA AÇÕES:
-Quando tiver TODOS os dados necessários (clientId, serviceId, employeeId, date, time), sua resposta DEVE seguir este formato exato:
-
-[mensagem curta confirmando o que vai fazer]
-
+AÇÕES — inclua ao final da resposta quando executar operação:
 \`\`\`action
 {"type":"agendar","params":{"clientId":123,"clientName":"Nome","serviceId":45,"employeeId":2,"date":"hoje","time":"14:00"}}
 \`\`\`
+Tipos: agendar | cancelar | mover | concluir
+- agendar: {clientId, clientName, serviceId, employeeId, date, time}
+- cancelar: {appointmentId}
+- mover: {appointmentId, newDate, newTime}
+- concluir: {appointmentId}
 
-Tipos disponíveis: agendar | cancelar | mover | concluir
-- agendar: requer {clientId, clientName, serviceId, employeeId, date, time}
-- cancelar: requer {appointmentId}
-- mover: requer {appointmentId, newDate, newTime}
-- concluir: requer {appointmentId}
-
-REGRAS CRÍTICAS DO BLOCO ACTION:
-- O bloco \`\`\`action deve aparecer SEMPRE ao final da resposta quando tiver todos os dados
-- O bloco deve conter JSON válido em UMA única linha
-- NUNCA omita o bloco action quando souber cliente, serviço, profissional, data e hora
-- NUNCA diga "agendado", "feito", "concluído" sem incluir o bloco action — o sistema executa a partir do bloco
-- Se faltar qualquer dado, pergunte ao usuário — NÃO inclua o bloco action
+IMPORTANTE:
 - NÃO verifique conflitos — o SISTEMA faz isso automaticamente
+- SEMPRE inclua o bloco action quando tiver todos os dados
+- Se falta informação, pergunte o que falta — NÃO inclua action
+- NUNCA confirme operação antes do retorno do sistema
 - date pode ser: "hoje", "amanha", "DD/MM", dia da semana, ou YYYY-MM-DD
+- Inclua clientName além do clientId
 ${buildMemoryPrompt()}`;
 }
 
@@ -698,21 +692,27 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
     return `Horário inválido: "${time}". Use formato HH:MM (ex: 14:00, 9:30).`;
 
   // 1. Localizar cliente
+  // Estratégia: cache local → busca Supabase → erro
   const allClients = await clientsStore.ensureLoaded();
-  let client = clientId
+  let client = (clientId && clientId > 0)
     ? allClients.find((c) => c.id === clientId) ?? null
     : null;
 
   if (!client && paramClientName) {
     const nameLower = paramClientName.toLowerCase().trim();
-    client = allClients.find((c) => c.name.toLowerCase() === nameLower)
-      ?? allClients.find((c) => {
+
+    // 1a. Busca exata no cache
+    client = allClients.find((c) => c.name.toLowerCase() === nameLower) ?? null;
+
+    // 1b. Busca parcial no cache
+    if (!client) {
+      client = allClients.find((c) => {
         const cn = c.name.toLowerCase();
         return cn.includes(nameLower) || nameLower.includes(cn);
-      })
-      ?? null;
+      }) ?? null;
+    }
 
-    // Por primeiro nome
+    // 1c. Por primeiro nome no cache
     if (!client) {
       const firstName = nameLower.split(" ")[0];
       if (firstName.length > 2) {
@@ -725,10 +725,26 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
         }
       }
     }
+
+    // 1d. Fallback: busca direto no Supabase (garante que acha mesmo fora do cache)
+    if (!client) {
+      console.log("[agentV2] Cliente não achado no cache, buscando no Supabase:", paramClientName);
+      try {
+        const found = await clientsStore.search(paramClientName, { limit: 10 });
+        if (found.length === 1) {
+          client = found[0];
+        } else if (found.length > 1) {
+          const names = found.slice(0, 5).map((c) => `${c.name} (ID:${c.id})`).join(", ");
+          return `Encontrei vários clientes com "${paramClientName}": ${names}. Qual deles?`;
+        }
+      } catch (err) {
+        console.warn("[agentV2] Busca Supabase falhou em executeSchedule:", err);
+      }
+    }
   }
 
   if (!client) {
-    return `Cliente "${paramClientName ?? clientId}" não encontrado. Verifique o cadastro.`;
+    return `Cliente "${paramClientName ?? clientId}" não encontrado no sistema. Verifique o cadastro.`;
   }
 
   // 2. Localizar serviço
@@ -898,20 +914,11 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   let actionExecuted = false;
   let navigateTo: string | undefined;
 
-  // ── Logs de diagnóstico ──
-  console.group("[agentV2] Resposta do LLM");
-  console.log("Raw completo:", raw);
   const match = raw.match(/```action\s*([\s\S]*?)```/);
-  console.log("Bloco action encontrado?", !!match);
-  if (match) console.log("JSON do action:", match[1].trim());
-  console.groupEnd();
-
   if (match) {
     try {
       const act: ActionPayload = JSON.parse(match[1]);
-      console.log("[agentV2] Executando ação:", act);
       const result = await executeAction(act);
-      console.log("[agentV2] Resultado da ação:", result);
 
       if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
         const lista = result.replace("AGUARDANDO_PROFISSIONAL:", "");
