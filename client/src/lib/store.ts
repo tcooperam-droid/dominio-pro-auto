@@ -871,7 +871,7 @@ export async function fetchAllData(): Promise<void> {
     appointmentsStore.fetchAll(),
     cashSessionsStore.fetchAll(),
     cashEntriesStore.fetchAll(),
-    auditStore.fetchAll(),
+    // auditStore.fetchAll() removido do boot — carregado sob demanda em HistoricoPage/BackupPage
   ]);
 }
 
