@@ -430,16 +430,24 @@ async function gatherData(msg: string): Promise<string> {
   );
 
   const stopWords = new Set([
+    // preposições e conectivos — "com" causava busca "ariele com" quebrando o score
+    "com", "sem", "por", "ate", "das", "dos", "num", "uma", "uns",
+    "ela", "ele", "elas", "eles", "seu", "sua", "seus", "suas",
+    // verbos e ações
     "quero", "agendar", "marcar", "cliente", "para", "preciso", "cancelar",
     "mover", "agenda", "hoje", "amanha", "hora", "servico", "horario",
     "consegue", "executar", "agendamento", "voce", "fazer", "nome", "tenho",
     "qual", "quais", "pode", "como", "quanto", "tempo", "duracao",
+    // serviços comuns
     "corte", "escova", "tintura", "manicure", "pedicure",
     "barba", "hidrata", "progressiva", "termica", "relaxamento", "botox",
     "coloracao", "luzes", "alisamento", "massagem", "unhas", "masculino",
-    "feminino", "sim", "nao", "forcar", "confirma", "confirmar", "forca",
+    "feminino",
+    // confirmações e comandos
+    "sim", "nao", "forcar", "confirma", "confirmar", "forca",
     "mesmo", "assim", "deixa", "esquece", "cancelado", "mova", "mude",
     "concluir", "fechar", "abrir", "buscar", "procurar",
+    // financeiro
     "faturamento", "financeiro", "receita", "comissao", "relatorio",
     "rendimento", "lucro", "caixa", "semana", "mes", "dia",
   ]);
@@ -448,13 +456,30 @@ async function gatherData(msg: string): Promise<string> {
     .split(/\s+/)
     .filter((w) => w.length > 2 && /^[A-Za-zÀ-ÖØ-öø-ÿ]/.test(w));
   const candidateNames = words.filter((w) => {
-    const wl = w.toLowerCase();
+    const wl = w.toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
     return !stopWords.has(wl) && !empsLower.has(wl) && !svcsLower.has(wl);
   });
 
   if (candidateNames.length > 0) {
-    const searchTerm = candidateNames.join(" ");
-    parts.push(await getClientWithHistory(searchTerm));
+    // Buscar cada candidato individualmente — evita "ariele com" que quebra score
+    let clientData = "";
+    for (const candidate of candidateNames.slice(0, 3)) {
+      const result = await getClientWithHistory(candidate);
+      if (!result.startsWith("Nenhum cliente") && !result.startsWith("Total")) {
+        clientData = result;
+        break;
+      }
+    }
+    // Se nenhum sozinho achou, tenta nome composto (ex: "Maria Silva")
+    if (!clientData && candidateNames.length > 1) {
+      clientData = await getClientWithHistory(candidateNames.slice(0, 2).join(" "));
+    }
+    if (!clientData) {
+      clientData = await getClientWithHistory(candidateNames[0]);
+    }
+    parts.push(clientData);
   } else {
     let totalStr = "(indisponível)";
     try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
