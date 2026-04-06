@@ -558,21 +558,23 @@ REGRAS:
 
 AÇÕES — inclua ao final da resposta quando executar operação:
 \`\`\`action
-{"type":"agendar","params":{"clientId":123,"clientName":"Nome","serviceId":45,"employeeId":2,"date":"hoje","time":"14:00"}}
+{"type":"agendar","params":{"clientName":"Nome Exato","serviceId":45,"employeeId":2,"date":"hoje","time":"14:00"}}
 \`\`\`
 Tipos: agendar | cancelar | mover | concluir
-- agendar: {clientId, clientName, serviceId, employeeId, date, time}
+- agendar: {clientName, serviceId, employeeId, date, time}
 - cancelar: {appointmentId}
 - mover: {appointmentId, newDate, newTime}
 - concluir: {appointmentId}
 
 IMPORTANTE:
+- NÃO inclua clientId — o SISTEMA resolve o cliente pelo nome automaticamente
+- Use o nome EXATO como aparece nos dados (ex: "JOAO DA SILVA", não "João")
+- Se houver múltiplos clientes com o mesmo nome nos dados, PERGUNTE qual deles antes de agendar
 - NÃO verifique conflitos — o SISTEMA faz isso automaticamente
-- SEMPRE inclua o bloco action quando tiver todos os dados
+- SEMPRE inclua o bloco action quando tiver todos os dados necessários
 - Se falta informação, pergunte o que falta — NÃO inclua action
 - NUNCA confirme operação antes do retorno do sistema
 - date pode ser: "hoje", "amanha", "DD/MM", dia da semana, ou YYYY-MM-DD
-- Inclua clientName além do clientId
 ${buildMemoryPrompt()}`;
 }
 
@@ -730,7 +732,7 @@ async function executeComplete(params: Record<string, unknown>): Promise<string>
 }
 
 async function executeSchedule(params: Record<string, unknown>): Promise<string> {
-  const clientId = params.clientId != null ? Number(params.clientId) : null;
+  // Ignorar clientId do LLM — sempre resolver pelo nome para evitar ID alucinado
   const serviceId = params.serviceId != null ? Number(params.serviceId) : null;
   const employeeId = params.employeeId != null ? Number(params.employeeId) : null;
   const date = String(params.date ?? "hoje");
@@ -742,14 +744,11 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
   if (!resolvedTime)
     return `Horário inválido: "${time}". Use formato HH:MM (ex: 14:00, 9:30).`;
 
-  // 1. Localizar cliente
-  // Estratégia: cache local → busca Supabase → erro
+  // 1. Localizar cliente sempre pelo nome (nunca pelo ID do LLM)
   const allClients = await clientsStore.ensureLoaded();
-  let client = (clientId && clientId > 0)
-    ? allClients.find((c) => c.id === clientId) ?? null
-    : null;
+  let client: typeof allClients[0] | null = null;
 
-  if (!client && paramClientName) {
+  if (paramClientName) {
     const nameLower = paramClientName.toLowerCase().trim();
 
     // 1a. Busca exata no cache
@@ -795,7 +794,7 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
   }
 
   if (!client) {
-    return `Cliente "${paramClientName ?? clientId}" não encontrado no sistema. Verifique o cadastro.`;
+    return `Cliente "${paramClientName ?? "desconhecido"}" não encontrado no sistema. Verifique o cadastro.`;
   }
 
   // 2. Localizar serviço
