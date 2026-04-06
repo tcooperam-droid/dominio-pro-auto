@@ -682,8 +682,12 @@ async function executeMove(params: Record<string, unknown>): Promise<string> {
   if (!resolvedTime) return `Horário inválido: "${params.newTime}". Use HH:MM.`;
 
   const durMs = new Date(appt.endTime).getTime() - new Date(appt.startTime).getTime();
-  const newStart = `${resolvedDate}T${resolvedTime}:00`;
-  const newEnd = new Date(new Date(newStart).getTime() + durMs).toISOString().slice(0, 19);
+  // Construir no horário LOCAL para evitar UTC shift
+  const [mYear, mMonth, mDay] = resolvedDate.split("-").map(Number);
+  const [mHour, mMin] = resolvedTime.split(":").map(Number);
+  const newStartDt = new Date(mYear, mMonth - 1, mDay, mHour, mMin, 0);
+  const newStart = newStartDt.toISOString().slice(0, 19);
+  const newEnd = new Date(newStartDt.getTime() + durMs).toISOString().slice(0, 19);
 
   const emp = employeesStore.list(true).find((e) => e.id === appt.employeeId);
   if (emp) {
@@ -827,10 +831,13 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
 
   // 5. Calcular horários
   const durationMinutes = svc.durationMinutes > 0 ? svc.durationMinutes : 60;
-  const startTime = `${resolvedDate}T${resolvedTime}:00`;
-  const endTime = new Date(
-    new Date(startTime).getTime() + durationMinutes * 60_000,
-  ).toISOString().slice(0, 19);
+  // Construir data no horário LOCAL (sem UTC shift) para exibição correta na agenda
+  const [rYear, rMonth, rDay] = resolvedDate.split("-").map(Number);
+  const [rHour, rMin] = resolvedTime.split(":").map(Number);
+  const startDt = new Date(rYear, rMonth - 1, rDay, rHour, rMin, 0);
+  const endDt = new Date(startDt.getTime() + durationMinutes * 60_000);
+  const startTime = startDt.toISOString().slice(0, 19);
+  const endTime = endDt.toISOString().slice(0, 19);
 
   // 6. Verificar conflito
   const conflict = appointmentsStore.list({ date: resolvedDate }).find((a) => {
