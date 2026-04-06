@@ -225,7 +225,21 @@ function isWithinWorkingHours(
   if (!wh || Object.keys(wh).length === 0) return { ok: true };
 
   const dayOfWeek = getDayOfWeek(dateStr);
-  const dayConfig = wh[String(dayOfWeek)];
+
+  // Suporta chaves numéricas ("0"-"6"), abreviações pt-BR ("dom","seg","ter","qua","qui","sex","sab")
+  // e nomes completos ("domingo","segunda","terca",...)
+  const ptKeys: Record<number, string[]> = {
+    0: ["dom", "domingo"],
+    1: ["seg", "segunda", "segunda-feira"],
+    2: ["ter", "terca", "terça", "terca-feira", "terça-feira"],
+    3: ["qua", "quarta", "quarta-feira"],
+    4: ["qui", "quinta", "quinta-feira"],
+    5: ["sex", "sexta", "sexta-feira"],
+    6: ["sab", "sábado", "sabado"],
+  };
+  const possibleKeys = [String(dayOfWeek), ...(ptKeys[dayOfWeek] ?? [])];
+  const matchedKey = possibleKeys.find((k) => wh[k] !== undefined);
+  const dayConfig = matchedKey ? wh[matchedKey] : undefined;
 
   if (!dayConfig || !dayConfig.active) {
     const dayNames = [
@@ -284,10 +298,18 @@ function getEmployeesData(): string {
     const wh = e.workingHours;
     let hoursInfo = "";
     if (wh && Object.keys(wh).length > 0) {
-      const dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+      const keyToLabel: Record<string, string> = {
+        "0": "Dom", "dom": "Dom", "domingo": "Dom",
+        "1": "Seg", "seg": "Seg", "segunda": "Seg",
+        "2": "Ter", "ter": "Ter", "terca": "Ter",
+        "3": "Qua", "qua": "Qua", "quarta": "Qua",
+        "4": "Qui", "qui": "Qui", "quinta": "Qui",
+        "5": "Sex", "sex": "Sex", "sexta": "Sex",
+        "6": "Sab", "sab": "Sab", "sabado": "Sab",
+      };
       const activeDays = Object.entries(wh)
         .filter(([, v]) => v && v.active)
-        .map(([k, v]) => `${dayNames[Number(k)] ?? k}: ${v.start}-${v.end}`)
+        .map(([k, v]) => `${keyToLabel[k.toLowerCase()] ?? k}: ${v.start}-${v.end}`)
         .join(", ");
       if (activeDays) hoursInfo = ` | Horários: ${activeDays}`;
     }
