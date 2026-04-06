@@ -6,7 +6,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import {
   MessageCircle, X, Send, Brain, Mic, ChevronDown,
-  ThumbsUp, ThumbsDown, Trash2, Zap,
+  ThumbsUp, ThumbsDown, Trash2, Zap, Volume2, VolumeX,
 } from "lucide-react";
 import { handleMessageV2, clearHistory, addFeedback } from "@/lib/agentV2";
 import { loadRules, removeRule } from "@/lib/agentMemory";
@@ -38,6 +38,33 @@ function getSalonName(): string {
     if (s) return JSON.parse(s).salonName || "Domínio Pro";
   } catch {}
   return "Domínio Pro";
+}
+
+// ─── TTS ───────────────────────────────────────────────────
+
+function speakText(text: string, onEnd?: () => void) {
+  if (!window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  // Limpar markdown/blocos técnicos antes de falar
+  const clean = text
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/ID:\d+/g, "")
+    .replace(/\n+/g, " ")
+    .trim();
+  if (!clean) return;
+  const utt = new SpeechSynthesisUtterance(clean);
+  utt.lang = "pt-BR";
+  utt.rate = 1.05;
+  utt.pitch = 1.1;
+  // Tentar voz feminina pt-BR
+  const voices = window.speechSynthesis.getVoices();
+  const ptVoices = voices.filter(v => v.lang.startsWith("pt"));
+  const femVoice = ptVoices.find(v =>
+    /female|feminina|francisca|vitoria|vitória|luciana|renata|google/i.test(v.name)
+  ) ?? ptVoices[0] ?? null;
+  if (femVoice) utt.voice = femVoice;
+  if (onEnd) utt.onend = onEnd;
+  window.speechSynthesis.speak(utt);
 }
 
 const QUICK_ACTIONS = [
@@ -79,6 +106,10 @@ export default function AgentChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const [ttsEnabled, setTtsEnabled] = useState(() => {
+    try { return localStorage.getItem("agent_tts") !== "false"; } catch { return true; }
+  });
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const accent = getAccent();
   const salonName = getSalonName();
 
@@ -150,6 +181,12 @@ export default function AgentChat() {
       });
 
       if (!isOpen) setHasNew(true);
+
+      // TTS — falar resposta se habilitado
+      if (ttsEnabled) {
+        setIsSpeaking(true);
+        speakText(response.text, () => setIsSpeaking(false));
+      }
 
       if (response.navigateTo) {
         setTimeout(() => setLocation(response.navigateTo!), 1000);
@@ -225,10 +262,20 @@ export default function AgentChat() {
     r.start();
   }, [isListening, sendMessage]);
 
+  const toggleTts = useCallback(() => {
+    setTtsEnabled(prev => {
+      const next = !prev;
+      try { localStorage.setItem("agent_tts", String(next)); } catch {}
+      if (!next) { window.speechSynthesis?.cancel(); setIsSpeaking(false); }
+      return next;
+    });
+  }, []);
+
   const toggleChat = useCallback(() => {
     setIsOpen(p => !p);
     setHasNew(false);
-  }, []);
+    if (isSpeaking) { window.speechSynthesis?.cancel(); setIsSpeaking(false); }
+  }, [isSpeaking]);
 
   return (
     <>
@@ -265,6 +312,16 @@ export default function AgentChat() {
                 <p className="text-[10px] text-white/40">Online — {salonName}</p>
               </div>
             </div>
+            <button
+              onClick={toggleTts}
+              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              title={ttsEnabled ? "Desativar voz" : "Ativar voz"}
+            >
+              {ttsEnabled
+                ? <Volume2 className="w-3.5 h-3.5" style={{ color: isSpeaking ? accent : "rgba(255,255,255,0.5)" }} />
+                : <VolumeX className="w-3.5 h-3.5 text-white/20" />
+              }
+            </button>
             <button
               onClick={() => setShowRules(r => !r)}
               className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
