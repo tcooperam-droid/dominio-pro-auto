@@ -64,7 +64,7 @@ export default function FuncionariosPage() {
       photoUrl: emp.photoUrl ?? "",
       specialties: emp.specialties.join(", "),
       commissionPercent: String(emp.commissionPercent),
-      workingHours: emp.workingHours ?? defaultWorkingHours(),
+      workingHours: { ...defaultWorkingHours(), ...(emp.workingHours ?? {}) },
       active: emp.active,
     });
     setModalOpen(true);
