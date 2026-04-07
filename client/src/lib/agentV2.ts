@@ -223,6 +223,8 @@ function isWithinWorkingHours(
 ): { ok: boolean; message?: string } {
   const wh = emp.workingHours;
   if (!wh || Object.keys(wh).length === 0) return { ok: true };
+  // Se só tem 1 chave no banco (dado corrompido/incompleto), não bloquear
+  if (Object.keys(wh).length === 1) return { ok: true };
 
   const dayOfWeek = getDayOfWeek(dateStr);
 
