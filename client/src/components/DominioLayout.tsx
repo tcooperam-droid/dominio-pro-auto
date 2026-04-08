@@ -28,10 +28,10 @@ const SECONDARY_NAV = [
   { path: "/funcionarios",          label: "Funcionários",  icon: UserCheck   },
   { path: "/servicos",              label: "Serviços",      icon: Scissors    },
   { path: "/ferramentas-clientes",  label: "Ferramentas",   icon: Wrench      },
-  { path: "/caixa/dashboard",       label: "Dashboard $",   icon: BarChart2   },
+  { path: "/dashboard-caixa",       label: "Dashboard $",   icon: BarChart2   },
   { path: "/relatorios",            label: "Relatórios",    icon: BarChart2   },
   { path: "/historico",             label: "Histórico",     icon: History     },
-  { path: "/historico/agendamentos",label: "Agendamentos",  icon: CalendarCheck },
+  { path: "/historico-agendamentos",label: "Agendamentos",  icon: CalendarCheck },
   { path: "/backup",                label: "Backup",        icon: Database    },
   { path: "/configuracoes",         label: "Configurações", icon: Settings    },
 ];
