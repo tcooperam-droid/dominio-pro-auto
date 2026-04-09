@@ -12,7 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Settings, Building2, Clock, Bell, Palette, Save, ImagePlus, Trash2, Scissors, Monitor, Zap, Shield, Eye, EyeOff } from "lucide-react";
+import { Settings, Building2, Clock, Bell, Palette, Save, ImagePlus, Trash2, Scissors, Monitor, Zap, Shield, Eye, EyeOff, Wrench } from "lucide-react";
+import { employeesStore } from "@/lib/store";
 import { applyAccentColor } from "@/contexts/ThemeContext";
 
 type BgType = "default" | "solid" | "gradient" | "image";
@@ -73,6 +74,31 @@ const ACCENT_COLORS = [
 ];
 
 export default function ConfiguracoesPage() {
+  const [fixingWH, setFixingWH] = useState(false);
+
+  const handleFixWorkingHours = async () => {
+    setFixingWH(true);
+    try {
+      const schedules: Record<number, Record<string, {start:string;end:string;active:boolean}>> = {
+        1: { seg:{start:"07:00",end:"18:00",active:false}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:false}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
+        2: { seg:{start:"07:00",end:"18:00",active:false}, ter:{start:"07:00",end:"18:00",active:false}, qua:{start:"07:00",end:"18:00",active:false}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
+        3: { seg:{start:"07:00",end:"18:00",active:true}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:true}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
+        4: { seg:{start:"07:00",end:"18:00",active:true}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:true}, qui:{start:"07:00",end:"18:00",active:false}, sex:{start:"07:00",end:"18:00",active:false}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
+        5: { seg:{start:"07:00",end:"18:00",active:true}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:true}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
+      };
+      let count = 0;
+      for (const [id, wh] of Object.entries(schedules)) {
+        await employeesStore.update(Number(id), { workingHours: wh });
+        count++;
+      }
+      toast.success(`Horários corrigidos para ${count} funcionários!`);
+    } catch (err: any) {
+      toast.error("Erro ao corrigir horários: " + (err?.message ?? "tente novamente"));
+    } finally {
+      setFixingWH(false);
+    }
+  };
+
   const [config, setConfig] = useState<SalonConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(false);
   const logoInputRef  = useRef<HTMLInputElement>(null);
@@ -565,6 +591,30 @@ export default function ConfiguracoesPage() {
               ✓ Controle de acesso ativo. Na próxima abertura do app será solicitada a senha.
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Correção de Horários */}
+      <Card className="border-border bg-card/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Wrench className="w-4 h-4 text-primary" />Manutenção
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <p className="text-xs text-muted-foreground mb-2">Corrige os horários de trabalho de todos os funcionários no banco de dados.</p>
+            <Button
+              onClick={handleFixWorkingHours}
+              disabled={fixingWH}
+              variant="outline"
+              size="sm"
+              className="w-full"
+            >
+              <Wrench className="w-3.5 h-3.5 mr-2" />
+              {fixingWH ? "Corrigindo..." : "Corrigir horários dos funcionários"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
