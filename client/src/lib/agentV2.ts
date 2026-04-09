@@ -106,7 +106,7 @@ interface PendingAction {
 }
 
 interface ActionPayload {
-  type: "agendar" | "cancelar" | "mover" | "concluir";
+  type: "agendar" | "cancelar" | "mover" | "concluir" | "criar_cliente" | "trocar_cliente";
   params: Record<string, unknown>;
 }
 
@@ -557,21 +557,27 @@ REGRAS:
 10. Use os horários de trabalho dos profissionais nos dados
 11. Quando o usuário perguntar sobre financeiro, use os dados financeiros fornecidos
 12. Se o caixa não estiver aberto, ALERTE o usuário
+13. HORÁRIOS OCUPADOS: cada agendamento tem um profissional (Prof: NOME). Um horário só está ocupado para um profissional SE houver agendamento com AQUELE profissional naquele horário. Agendamentos de outros profissionais NÃO bloqueiam o horário do profissional solicitado
+14. Ao sugerir horários disponíveis, liste APENAS os horários que NÃO têm agendamento para o profissional específico solicitado
+15. NUNCA peça confirmação mais de uma vez para o mesmo agendamento — se já confirmou, execute a ação diretamente
 
 AÇÕES — inclua ao final da resposta quando executar operação:
 \`\`\`action
 {"type":"agendar","params":{"clientName":"Nome Exato","serviceId":45,"employeeId":2,"date":"hoje","time":"14:00"}}
 \`\`\`
-Tipos: agendar | cancelar | mover | concluir
+Tipos: agendar | cancelar | mover | concluir | criar_cliente | trocar_cliente
 - agendar: {clientName, serviceId, employeeId, date, time}
 - cancelar: {appointmentId}
 - mover: {appointmentId, newDate, newTime}
 - concluir: {appointmentId}
+- criar_cliente: {name, phone?} — use quando cliente não existe no sistema
+- trocar_cliente: {appointmentId, newClientName} — troca o cliente de um agendamento existente
 
 IMPORTANTE:
 - NÃO inclua clientId — o SISTEMA resolve o cliente pelo nome automaticamente
 - Use o nome EXATO como aparece nos dados (ex: "JOAO DA SILVA", não "João")
 - Se houver múltiplos clientes com o mesmo nome nos dados, PERGUNTE qual deles antes de agendar
+- Se cliente não existe no sistema, use criar_cliente ANTES de agendar
 - NÃO verifique conflitos — o SISTEMA faz isso automaticamente
 - SEMPRE inclua o bloco action quando tiver todos os dados necessários
 - Se falta informação, pergunte o que falta — NÃO inclua action
@@ -650,6 +656,64 @@ async function callLLM(
 
 // ─── Execução de ações ────────────────────────────────────
 
+async function executeCreateClient(params: Record<string, unknown>): Promise<string> {
+  const name = params.name ? String(params.name).trim() : null;
+  if (!name) return "Nome do cliente é obrigatório para criar o cadastro.";
+
+  // Verificar se já existe
+  const allClients = await clientsStore.ensureLoaded();
+  const exists = allClients.find(c => c.name.toLowerCase() === name.toLowerCase());
+  if (exists) return `Cliente "${exists.name}" já existe no sistema (ID:${exists.id}). Use este cliente para agendar.`;
+
+  const phone = params.phone ? String(params.phone).trim() : null;
+  const created = await clientsStore.create({
+    name,
+    phone: phone || null,
+    email: null,
+    birthDate: null,
+    cpf: null,
+    address: null,
+    notes: null,
+  });
+  window.dispatchEvent(new Event("store_updated"));
+  return `Cliente "${created.name}" criado com sucesso! ID:${created.id}. Agora pode agendar normalmente.`;
+}
+
+async function executeSwapClient(params: Record<string, unknown>): Promise<string> {
+  const apptId = Number(params.appointmentId);
+  const newClientName = params.newClientName ? String(params.newClientName).trim() : null;
+  if (!newClientName) return "Nome do novo cliente é obrigatório.";
+
+  const appt = appointmentsStore.list({}).find(a => a.id === apptId);
+  if (!appt) return `Agendamento ID:${apptId} não encontrado.`;
+
+  // Buscar novo cliente
+  const allClients = await clientsStore.ensureLoaded();
+  const nameLower = newClientName.toLowerCase();
+  let client = allClients.find(c => c.name.toLowerCase() === nameLower) ?? null;
+  if (!client) {
+    client = allClients.find(c => c.name.toLowerCase().includes(nameLower) || nameLower.includes(c.name.toLowerCase())) ?? null;
+  }
+  if (!client) {
+    try {
+      const found = await clientsStore.search(newClientName, { limit: 5 });
+      if (found.length === 1) client = found[0];
+      else if (found.length > 1) {
+        const names = found.slice(0, 5).map(c => `${c.name} (ID:${c.id})`).join(", ");
+        return `Encontrei vários clientes com "${newClientName}": ${names}. Qual deles?`;
+      }
+    } catch { /* ignorar */ }
+  }
+  if (!client) return `Cliente "${newClientName}" não encontrado. Verifique o cadastro.`;
+
+  await appointmentsStore.update(apptId, {
+    clientName: client.name,
+    clientId: client.id,
+  });
+  window.dispatchEvent(new Event("store_updated"));
+  return `Cliente trocado com sucesso!\nAgendamento ID:${apptId}\nNovo cliente: ${client.name}`;
+}
+
 async function executeAction(action: ActionPayload): Promise<string> {
   const { type, params } = action;
   try {
@@ -657,6 +721,8 @@ async function executeAction(action: ActionPayload): Promise<string> {
     if (type === "cancelar") return await executeCancel(params);
     if (type === "mover") return await executeMove(params);
     if (type === "concluir") return await executeComplete(params);
+    if (type === "criar_cliente") return await executeCreateClient(params);
+    if (type === "trocar_cliente") return await executeSwapClient(params);
     return `Ação desconhecida: "${type}".`;
   } catch (err) {
     console.error("[AgentV2] Erro em executeAction:", { type, params, err });
