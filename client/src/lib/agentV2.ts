@@ -1071,7 +1071,42 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
     }
   } else if (isLikelyActionRequest(msgTrimmed)) {
     if (claimsActionSuccess(raw)) {
-      text = "Ainda não confirmei essa operação no banco. O modelo respondeu sem acionar a função corretamente. Tente repetir com cliente, serviço, data e horário.";
+      // LLM afirmou ter feito mas não gerou o bloco action — forçar extração via segunda chamada
+      console.log("[agentV2] LLM não gerou action, tentando extração forçada...");
+      try {
+        const forceRaw = await callLLM(
+          `Você é um extrator de JSON. Analise a conversa e extraia os dados do agendamento em formato JSON exato.
+Responda APENAS com o JSON, sem texto adicional, sem explicações, sem markdown.
+Formato obrigatório: {"type":"agendar","params":{"clientName":"NOME","serviceId":0,"employeeId":0,"date":"YYYY-MM-DD","time":"HH:MM"}}
+Se não tiver todos os dados, responda: {}`,
+          [],
+          `Contexto: ${msgTrimmed}\nResposta do assistente: ${raw}\nDados do sistema: ${systemData}`,
+          "",
+          cfg,
+        );
+        const cleaned = forceRaw.replace(/```[\s\S]*?```/g, "").trim();
+        if (cleaned && cleaned !== "{}") {
+          const act: ActionPayload = JSON.parse(cleaned);
+          if (act.type && act.params) {
+            const result = await executeAction(act);
+            if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+              text = `Com qual profissional deseja agendar? Disponíveis: ${result.replace("AGUARDANDO_PROFISSIONAL:", "")}`;
+            } else if (result.startsWith("CONFLITO:")) {
+              text = `Conflito de horário: ${result.replace("CONFLITO:", "")}\nDeseja agendar mesmo assim?`;
+            } else {
+              text = result;
+              actionExecuted = result.includes("criado com sucesso") || result.includes("cancelado com sucesso") || result.includes("movido com sucesso");
+              if (actionExecuted && (act.type === "agendar" || act.type === "mover")) navigateTo = "/agenda";
+            }
+          } else {
+            text = raw.replace(/```[\s\S]*?```/g, "").trim();
+          }
+        } else {
+          text = raw.replace(/```[\s\S]*?```/g, "").trim();
+        }
+      } catch {
+        text = raw.replace(/```[\s\S]*?```/g, "").trim();
+      }
     } else {
       text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
     }
