@@ -446,15 +446,18 @@ async function gatherData(msg: string): Promise<string> {
   const parts: string[] = [getTodayData(), getEmployeesData(), getServicesData()];
 
   // Extrair candidatos a nome de cliente
+  const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
   const empsLower = new Set(
-    employeesStore.list(true).flatMap((e) => e.name.toLowerCase().split(" "))
+    employeesStore.list(true).flatMap((e) => e.name.toLowerCase().split(" ").map(normalize))
   );
+  // Normalizar palavras dos serviços para casar mesmo com acentos
   const svcsLower = new Set(
-    servicesStore.list(true).flatMap((s) => s.name.toLowerCase().split(" "))
+    servicesStore.list(true).flatMap((s) => s.name.split(" ").map(normalize))
   );
 
   const stopWords = new Set([
-    // preposições e conectivos — "com" causava busca "ariele com" quebrando o score
+    // preposições e conectivos
     "com", "sem", "por", "ate", "das", "dos", "num", "uma", "uns",
     "ela", "ele", "elas", "eles", "seu", "sua", "seus", "suas",
     // verbos e ações
@@ -462,11 +465,12 @@ async function gatherData(msg: string): Promise<string> {
     "mover", "agenda", "hoje", "amanha", "hora", "servico", "horario",
     "consegue", "executar", "agendamento", "voce", "fazer", "nome", "tenho",
     "qual", "quais", "pode", "como", "quanto", "tempo", "duracao",
-    // serviços comuns
+    // serviços comuns e variações
     "corte", "escova", "tintura", "manicure", "pedicure",
-    "barba", "hidrata", "progressiva", "termica", "relaxamento", "botox",
-    "coloracao", "luzes", "alisamento", "massagem", "unhas", "masculino",
-    "feminino",
+    "barba", "hidrata", "hidratacao", "profunda", "progressiva",
+    "termica", "relaxamento", "botox", "coloracao", "luzes",
+    "alisamento", "massagem", "unhas", "masculino", "feminino",
+    "selagem", "reflexo", "mechas", "penteado", "sobrancelha",
     // confirmações e comandos
     "sim", "nao", "forcar", "confirma", "confirmar", "forca",
     "mesmo", "assim", "deixa", "esquece", "cancelado", "mova", "mude",
@@ -474,15 +478,16 @@ async function gatherData(msg: string): Promise<string> {
     // financeiro
     "faturamento", "financeiro", "receita", "comissao", "relatorio",
     "rendimento", "lucro", "caixa", "semana", "mes", "dia",
+    // números como palavras (evita "60", "180" virarem candidatos)
+    "160", "170", "180", "190", "200", "210", "220", "30", "35",
+    "40", "45", "50", "55", "60", "65", "70", "80", "90",
   ]);
 
   const words = msg
     .split(/\s+/)
     .filter((w) => w.length > 2 && /^[A-Za-zÀ-ÖØ-öø-ÿ]/.test(w));
   const candidateNames = words.filter((w) => {
-    const wl = w.toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+    const wl = normalize(w);
     return !stopWords.has(wl) && !empsLower.has(wl) && !svcsLower.has(wl);
   });
 
