@@ -587,6 +587,8 @@ IMPORTANTE:
 - SEMPRE inclua o bloco action quando tiver todos os dados necessários
 - Se falta informação, pergunte o que falta — NÃO inclua action
 - NUNCA confirme operação antes do retorno do sistema
+- NUNCA diga "realizando", "vou agendar", "efetuando" sem incluir o bloco action — isso engana o usuário
+- Se tiver todos os dados necessários, inclua o bloco action IMEDIATAMENTE sem anunciar o que vai fazer
 - date pode ser: "hoje", "amanha", "DD/MM", dia da semana, ou YYYY-MM-DD
 ${buildMemoryPrompt()}`;
 }
@@ -979,7 +981,7 @@ function isLikelyActionRequest(text: string): boolean {
 }
 
 function claimsActionSuccess(text: string): boolean {
-  return /\b(agendei|agendado com sucesso|marquei|cancelei|cancelado com sucesso|movi|reagendei|conclui|concluido com sucesso|feito)\b/i.test(text);
+  return /\b(agendei|agendado com sucesso|marquei|cancelei|cancelado com sucesso|movi|reagendei|conclui|concluido com sucesso|feito|realizando o agendamento|vou agendar|agendamento realizado|efetuando|executando|processando o agendamento)\b/i.test(text);
 }
 
 // ─── Configuração e API pública ───────────────────────────
