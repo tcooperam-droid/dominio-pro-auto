@@ -394,6 +394,21 @@ export default function AgendaPage() {
   const [refreshKey, setRefreshKey]       = useState(0);
   const [refreshing, setRefreshing]       = useState(false);
 
+  // Escutar evento do agente IA e outras atualizações do store
+  useEffect(() => {
+    const onStoreUpdate = async () => {
+      // Rebusca dados do Supabase para garantir que o cache está atualizado
+      try { await fetchAllData(); } catch { /* ignorar */ }
+      setRefreshKey(k => k + 1);
+    };
+    window.addEventListener("store_updated", onStoreUpdate);
+    window.addEventListener("appointments_updated", onStoreUpdate);
+    return () => {
+      window.removeEventListener("store_updated", onStoreUpdate);
+      window.removeEventListener("appointments_updated", onStoreUpdate);
+    };
+  }, []);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
