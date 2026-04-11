@@ -1,825 +1,1257 @@
 /**
- * AgendaPage — Grade de horários por funcionário com drag-and-drop.
- * Design: Glass Dashboard. Adaptado de tRPC para localStorage store.
- * Suporta groupId para agrupar serviços do mesmo cliente.
+ * agentV2.ts — Agente IA v2 reescrito do zero para Domínio Pro
+ *
+ * Arquitetura LLM-First limpa:
+ *  - O LLM decide tudo com dados reais do sistema injetados no prompt
+ *  - Ações são extraídas como blocos JSON e executadas no banco
+ *  - Sistema de memória integrado (preferências, regras, feedback)
+ *
+ * Funcionalidades:
+ *  - Agendamentos: criar, cancelar, mover, concluir
+ *  - Consultas: agenda do dia, data específica, buscar cliente, serviços, profissionais
+ *  - Financeiro: faturamento por período, serviços rentáveis, caixa, comissões
+ *  - Comportamentos inteligentes: sugestão de último serviço, conflitos, resolução de nomes
+ *  - Aprendizado: preferências de clientes, regras ensinadas, feedback negativo
  */
-import { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
-import { format, addDays, subDays, parseISO } from "date-fns";
-import { ptBR } from "date-fns/locale";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Plus, Calendar, CalendarDays, RefreshCw, Clock, Link2, Search } from "lucide-react";
-import { Calendar as CalendarUI } from "@/components/ui/calendar";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import AppointmentModal from "@/components/AppointmentModal";
-import { cn } from "@/lib/utils";
+
 import {
-  employeesStore, servicesStore, appointmentsStore, fetchAllData,
+  clientsStore,
+  servicesStore,
+  employeesStore,
+  appointmentsStore,
+  cashSessionsStore,
+  type Employee,
+  type Service,
   type Appointment,
-} from "@/lib/store";
+  type AppointmentService,
+} from "./store";
+import {
+  calcPeriodStats,
+  calcRevenueByEmployee,
+  calcPopularServices,
+  getAppointmentsInPeriod,
+  getPeriodDates,
+} from "./analytics";
+import {
+  buildMemoryPrompt,
+  detectTeachingIntent,
+  addRule,
+  addFeedback as memoryAddFeedback,
+  refreshPreferences,
+} from "./agentMemory";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-const HOUR_HEIGHT = 64;
-const MIN_COL_WIDTH = 120;
+// ─── Tipos públicos ───────────────────────────────────────
 
-function loadScheduleConfig() {
+export interface AgentMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AgentV2Config {
+  apiToken: string;
+  model?: string;
+  businessContext?: string;
+  salonName?: string;
+}
+
+export interface AgentV2Response {
+  text: string;
+  actionExecuted?: boolean;
+  navigateTo?: string;
+  messageId?: string;
+  userMessage?: string;
+}
+
+// ─── Constantes ───────────────────────────────────────────
+
+const HISTORY_KEY = "agentv2_history";
+const PENDING_KEY = "agentv2_pending";
+const LLM_ENDPOINT = "https://models.github.ai/inference/chat/completions";
+const LLM_PROXY = "/api/llm";
+
+// ─── Histórico ────────────────────────────────────────────
+
+function loadHistory(): AgentMessage[] {
   try {
-    const saved = localStorage.getItem("salon_config");
-    if (saved) {
-      const c = JSON.parse(saved);
-      const startH = parseInt((c.openTime  || "07:00").split(":")[0]);
-      const endH   = parseInt((c.closeTime || "21:00").split(":")[0]);
-      const snap   = parseInt(c.slotDuration) || 15;
+    const raw = localStorage.getItem(HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(h: AgentMessage[]): void {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(h.slice(-20)));
+  } catch { /* ignore */ }
+}
+
+function addToHistory(role: "user" | "assistant", content: string): void {
+  const h = loadHistory();
+  h.push({ role, content });
+  saveHistory(h);
+}
+
+export function clearHistory(): void {
+  localStorage.removeItem(HISTORY_KEY);
+  clearPendingAction();
+}
+
+// ─── Ações pendentes (conflito / profissional) ────────────
+
+interface PendingAction {
+  action: ActionPayload;
+  type: "conflict" | "professional";
+  timestamp: number;
+}
+
+interface ActionPayload {
+  type: "agendar" | "cancelar" | "mover" | "concluir" | "criar_cliente" | "trocar_cliente";
+  params: Record<string, unknown>;
+}
+
+function savePendingAction(action: ActionPayload, type: "conflict" | "professional"): void {
+  try {
+    const data: PendingAction = { action, type, timestamp: Date.now() };
+    localStorage.setItem(PENDING_KEY, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
+
+function loadPendingAction(): PendingAction | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    const data: PendingAction = JSON.parse(raw);
+    if (Date.now() - data.timestamp > 10 * 60_000) {
+      clearPendingAction();
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function clearPendingAction(): void {
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch { /* ignore */ }
+}
+
+// ─── Helpers de data/hora ─────────────────────────────────
+
+function getTodayStr(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getDayOfWeek(dateStr: string): number {
+  return new Date(dateStr + "T12:00:00").getDay();
+}
+
+function timeToMinutes(t: string): number {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+function normalizeTime(raw: string): string | null {
+  if (!raw) return null;
+  let t = raw.toLowerCase().replace(/h/gi, ":").replace(/\s+/g, "").trim();
+  t = t.replace(/:$/, "");
+  if (/^\d{1,2}$/.test(t)) t = `${t.padStart(2, "0")}:00`;
+  if (/^\d{1,2}:\d{2}$/.test(t)) {
+    const [h, m] = t.split(":");
+    const hh = parseInt(h);
+    const mm = parseInt(m);
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+    return `${h.padStart(2, "0")}:${m}`;
+  }
+  return null;
+}
+
+function resolveDate(raw: string): string {
+  const today = new Date();
+  const r = (raw || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+  if (!r || r === "hoje") return today.toISOString().split("T")[0];
+
+  if (r === "amanha") {
+    const d = new Date(today);
+    d.setDate(today.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  }
+
+  const dayMap: Record<string, number> = {
+    domingo: 0, segunda: 1, terca: 2,
+    quarta: 3, quinta: 4, sexta: 5, sabado: 6,
+    "segunda-feira": 1, "terca-feira": 2,
+    "quarta-feira": 3, "quinta-feira": 4, "sexta-feira": 5,
+  };
+  if (dayMap[r] !== undefined) {
+    const target = dayMap[r];
+    const current = today.getDay();
+    let diff = target - current;
+    if (diff <= 0) diff += 7;
+    const d = new Date(today);
+    d.setDate(today.getDate() + diff);
+    return d.toISOString().split("T")[0];
+  }
+
+  if (/^\d{1,2}\/\d{1,2}/.test(r)) {
+    const [dd, mm, yy] = r.split("/");
+    return `${yy ?? today.getFullYear()}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+  }
+
+  if (/^\d{1,2}$/.test(r)) {
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${r.padStart(2, "0")}`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(r)) return r;
+
+  return r;
+}
+
+// ─── Validação de horário de trabalho ─────────────────────
+
+function isWithinWorkingHours(
+  emp: Employee,
+  dateStr: string,
+  timeStr: string,
+): { ok: boolean; message?: string } {
+  const wh = emp.workingHours;
+  if (!wh || Object.keys(wh).length === 0) return { ok: true };
+  // Se só tem 1 chave no banco (dado corrompido/incompleto), não bloquear
+  if (Object.keys(wh).length === 1) return { ok: true };
+
+  const dayOfWeek = getDayOfWeek(dateStr);
+
+  // Suporta chaves numéricas ("0"-"6"), abreviações pt-BR ("dom","seg","ter","qua","qui","sex","sab")
+  // e nomes completos ("domingo","segunda","terca",...)
+  const ptKeys: Record<number, string[]> = {
+    0: ["dom", "domingo"],
+    1: ["seg", "segunda", "segunda-feira"],
+    2: ["ter", "terca", "terça", "terca-feira", "terça-feira"],
+    3: ["qua", "quarta", "quarta-feira"],
+    4: ["qui", "quinta", "quinta-feira"],
+    5: ["sex", "sexta", "sexta-feira"],
+    6: ["sab", "sábado", "sabado"],
+  };
+  const possibleKeys = [String(dayOfWeek), ...(ptKeys[dayOfWeek] ?? [])];
+  const matchedKey = possibleKeys.find((k) => wh[k] !== undefined);
+  const dayConfig = matchedKey ? wh[matchedKey] : undefined;
+
+  if (!dayConfig || !dayConfig.active) {
+    const dayNames = [
+      "domingo", "segunda-feira", "terça-feira", "quarta-feira",
+      "quinta-feira", "sexta-feira", "sábado",
+    ];
+    return {
+      ok: false,
+      message: `${emp.name} não trabalha ${dayNames[dayOfWeek]}.`,
+    };
+  }
+
+  const startMin = timeToMinutes(dayConfig.start);
+  const endMin = timeToMinutes(dayConfig.end);
+  const reqMin = timeToMinutes(timeStr);
+
+  if (reqMin < startMin || reqMin >= endMin) {
+    return {
+      ok: false,
+      message: `${emp.name} trabalha das ${dayConfig.start} às ${dayConfig.end} neste dia. O horário ${timeStr} está fora do expediente.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+// ─── Dados do sistema para o prompt ───────────────────────
+
+function getTodayData(): string {
+  const today = getTodayStr();
+  const appts = appointmentsStore.list({ date: today });
+  const emps = employeesStore.list(true);
+  if (appts.length === 0) return `Hoje (${today}): nenhum agendamento.`;
+  const lines = appts.map((a) => {
+    const emp = emps.find((e) => e.id === a.employeeId);
+    const hora = a.startTime?.split("T")[1]?.slice(0, 5) ?? "";
+    const horaFim = a.endTime?.split("T")[1]?.slice(0, 5) ?? "";
+    const svcs = a.services?.map((s) => s.name).join(", ") ?? "";
+    return `  - ${hora}-${horaFim} | ${a.clientName} | ${svcs} | Prof: ${emp?.name ?? "?"} | ${a.status} | ID:${a.id}`;
+  });
+  return `Agendamentos hoje (${today}):\n${lines.join("\n")}`;
+}
+
+function getServicesData(): string {
+  const svcs = servicesStore.list(true);
+  if (svcs.length === 0) return "Nenhum serviço cadastrado.";
+  return `Serviços disponíveis:\n${svcs.map((s) =>
+    `  - ID:${s.id} | ${s.name} | R$${s.price?.toFixed(2)} | ${s.durationMinutes}min`
+  ).join("\n")}`;
+}
+
+function getEmployeesData(): string {
+  const emps = employeesStore.list(true);
+  if (emps.length === 0) return "Nenhum profissional ativo.";
+  return `Profissionais ativos:\n${emps.map((e) => {
+    const wh = e.workingHours;
+    let hoursInfo = "";
+    if (wh && Object.keys(wh).length > 0) {
+      const keyToLabel: Record<string, string> = {
+        "0": "Dom", "dom": "Dom", "domingo": "Dom",
+        "1": "Seg", "seg": "Seg", "segunda": "Seg",
+        "2": "Ter", "ter": "Ter", "terca": "Ter",
+        "3": "Qua", "qua": "Qua", "quarta": "Qua",
+        "4": "Qui", "qui": "Qui", "quinta": "Qui",
+        "5": "Sex", "sex": "Sex", "sexta": "Sex",
+        "6": "Sab", "sab": "Sab", "sabado": "Sab",
+      };
+      const activeDays = Object.entries(wh)
+        .filter(([, v]) => v && v.active)
+        .map(([k, v]) => `${keyToLabel[k.toLowerCase()] ?? k}: ${v.start}-${v.end}`)
+        .join(", ");
+      if (activeDays) hoursInfo = ` | Horários: ${activeDays}`;
+    }
+    return `  - ID:${e.id} | ${e.name} | Comissão: ${e.commissionPercent}%${hoursInfo}`;
+  }).join("\n")}`;
+}
+
+function getApptsByDate(dateStr: string): string {
+  const date = resolveDate(dateStr);
+  const appts = appointmentsStore.list({ date });
+  const emps = employeesStore.list(true);
+  if (appts.length === 0) return `Nenhum agendamento em ${date}.`;
+  return `Agendamentos ${date}:\n${appts.map((a) => {
+    const emp = emps.find((e) => e.id === a.employeeId);
+    const hora = a.startTime?.split("T")[1]?.slice(0, 5) ?? "";
+    const horaFim = a.endTime?.split("T")[1]?.slice(0, 5) ?? "";
+    const svcs = a.services?.map((s) => s.name).join(", ") ?? "";
+    return `  - ${hora}-${horaFim} | ${a.clientName} | ${svcs} | ${emp?.name ?? "?"} | ${a.status} | ID:${a.id}`;
+  }).join("\n")}`;
+}
+
+// ─── Busca de clientes com histórico ─────────────────────
+
+async function getClientWithHistory(query: string): Promise<string> {
+  const q = query.trim();
+  if (!q) {
+    let totalStr = "(indisponível)";
+    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    return `Total clientes: ${totalStr}`;
+  }
+
+  let found: Awaited<ReturnType<typeof clientsStore.search>> = [];
+  try {
+    found = await clientsStore.search(q, { limit: 15 });
+  } catch (err) {
+    console.warn("[agentV2] Busca Supabase falhou:", err);
+  }
+
+  if (found.length === 0) {
+    let totalStr = "(indisponível)";
+    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    return `Nenhum cliente encontrado com "${query}". Total no sistema: ${totalStr}.`;
+  }
+
+  let recentAppointments: Appointment[] = [];
+  try {
+    recentAppointments = await appointmentsStore.fetchByClientIds(
+      found.map((c) => c.id),
+    );
+  } catch {
+    // Ignorar falha na busca de histórico
+  }
+
+  const lastByClient = new Map<number, Appointment>();
+  for (const appt of recentAppointments) {
+    if (appt.clientId && !lastByClient.has(appt.clientId)) {
+      lastByClient.set(appt.clientId, appt);
+    }
+  }
+
+  const lines: string[] = [];
+  for (const c of found) {
+    let line = `  - ID:${c.id} | ${c.name}`;
+    if (c.phone) line += ` | ${c.phone}`;
+    const last = lastByClient.get(c.id);
+    if (last) {
+      const lastSvc = last.services?.[0]?.name ?? "";
+      const lastDate = last.startTime?.split("T")[0] ?? "";
+      line += ` | Último serviço: ${lastSvc} em ${lastDate}`;
+    }
+    lines.push(line);
+  }
+
+  return `Clientes encontrados (${found.length}):\n${lines.join("\n")}`;
+}
+
+// ─── Dados financeiros ────────────────────────────────────
+
+function getFinancialSummary(scope: "dia" | "semana" | "mes"): string {
+  const periodMap: Record<string, "hoje" | "semana" | "mes"> = {
+    dia: "hoje",
+    semana: "semana",
+    mes: "mes",
+  };
+  const { start, end } = getPeriodDates(periodMap[scope]);
+  const employees = employeesStore.list(false);
+  const appts = getAppointmentsInPeriod(start, end);
+  const stats = calcPeriodStats(appts, employees);
+  const byEmployee = calcRevenueByEmployee(appts, employees);
+  const popular = calcPopularServices(appts);
+
+  const lines: string[] = [
+    `Financeiro (${scope}):`,
+    `  Faturamento bruto: R$ ${stats.totalRevenue.toFixed(2)}`,
+    `  Custos de material: R$ ${stats.totalMaterial.toFixed(2)}`,
+    `  Comissões: R$ ${stats.totalCommissions.toFixed(2)}`,
+    `  Líquido: R$ ${stats.netRevenue.toFixed(2)}`,
+    `  Atendimentos: ${stats.count}`,
+    `  Ticket médio: R$ ${stats.avgTicket.toFixed(2)}`,
+    `  Cancelamentos: ${stats.cancelCount} (${stats.cancelRate.toFixed(1)}%)`,
+  ];
+
+  if (byEmployee.length > 0) {
+    lines.push(`  Comissões por profissional:`);
+    for (const e of byEmployee.slice(0, 5)) {
+      lines.push(`    - ${e.name}: R$ ${e.revenue.toFixed(2)} faturado | R$ ${e.commission.toFixed(2)} comissão (${e.commissionPercent}%) | ${e.count} atend.`);
+    }
+  }
+
+  if (popular.length > 0) {
+    lines.push(`  Serviços mais rentáveis:`);
+    for (const s of popular.slice(0, 5)) {
+      lines.push(`    - ${s.name}: ${s.count}x | R$ ${s.revenue.toFixed(2)}`);
+    }
+  }
+
+  // Alerta de caixa
+  const currentCash = cashSessionsStore.getCurrent();
+  if (!currentCash) {
+    lines.push(`  ⚠ ALERTA: Caixa NÃO está aberto!`);
+  } else {
+    lines.push(`  Caixa: aberto desde ${new Date(currentCash.openedAt).toLocaleString("pt-BR")}`);
+  }
+
+  return lines.join("\n");
+}
+
+// ─── Dados contextuais para o LLM ────────────────────────
+
+async function gatherData(msg: string): Promise<string> {
+  const q = msg.toLowerCase();
+  const parts: string[] = [getTodayData(), getEmployeesData(), getServicesData()];
+
+  // Extrair candidatos a nome de cliente
+  const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  const empsLower = new Set(
+    employeesStore.list(true).flatMap((e) => e.name.toLowerCase().split(" ").map(normalize))
+  );
+  // Normalizar palavras dos serviços para casar mesmo com acentos
+  const svcsLower = new Set(
+    servicesStore.list(true).flatMap((s) => s.name.split(" ").map(normalize))
+  );
+
+  const stopWords = new Set([
+    // preposições e conectivos
+    "com", "sem", "por", "ate", "das", "dos", "num", "uma", "uns",
+    "ela", "ele", "elas", "eles", "seu", "sua", "seus", "suas",
+    // verbos e ações
+    "quero", "agendar", "marcar", "cliente", "para", "preciso", "cancelar",
+    "mover", "agenda", "hoje", "amanha", "hora", "servico", "horario",
+    "consegue", "executar", "agendamento", "voce", "fazer", "nome", "tenho",
+    "qual", "quais", "pode", "como", "quanto", "tempo", "duracao",
+    // serviços comuns e variações
+    "corte", "escova", "tintura", "manicure", "pedicure",
+    "barba", "hidrata", "hidratacao", "profunda", "progressiva",
+    "termica", "relaxamento", "botox", "coloracao", "luzes",
+    "alisamento", "massagem", "unhas", "masculino", "feminino",
+    "selagem", "reflexo", "mechas", "penteado", "sobrancelha",
+    // confirmações e comandos
+    "sim", "nao", "forcar", "confirma", "confirmar", "forca",
+    "mesmo", "assim", "deixa", "esquece", "cancelado", "mova", "mude",
+    "concluir", "fechar", "abrir", "buscar", "procurar",
+    // financeiro
+    "faturamento", "financeiro", "receita", "comissao", "relatorio",
+    "rendimento", "lucro", "caixa", "semana", "mes", "dia",
+    // números como palavras (evita "60", "180" virarem candidatos)
+    "160", "170", "180", "190", "200", "210", "220", "30", "35",
+    "40", "45", "50", "55", "60", "65", "70", "80", "90",
+  ]);
+
+  const words = msg
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && /^[A-Za-zÀ-ÖØ-öø-ÿ]/.test(w));
+  const candidateNames = words.filter((w) => {
+    const wl = normalize(w);
+    return !stopWords.has(wl) && !empsLower.has(wl) && !svcsLower.has(wl);
+  });
+
+  if (candidateNames.length > 0) {
+    // Buscar cada candidato individualmente — evita "ariele com" que quebra score
+    let clientData = "";
+    for (const candidate of candidateNames.slice(0, 3)) {
+      const result = await getClientWithHistory(candidate);
+      if (!result.startsWith("Nenhum cliente") && !result.startsWith("Total")) {
+        clientData = result;
+        break;
+      }
+    }
+    // Se nenhum sozinho achou, tenta nome composto (ex: "Maria Silva")
+    if (!clientData && candidateNames.length > 1) {
+      clientData = await getClientWithHistory(candidateNames.slice(0, 2).join(" "));
+    }
+    if (!clientData) {
+      clientData = await getClientWithHistory(candidateNames[0]);
+    }
+    parts.push(clientData);
+  } else {
+    let totalStr = "(indisponível)";
+    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    parts.push(`Total clientes cadastrados: ${totalStr}. Use busca por nome para localizar.`);
+  }
+
+  // Se menciona data específica
+  const dateMatch = q.match(
+    /\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|amanha|amanhã|segunda|terca|terça|quarta|quinta|sexta|sabado|sábado|domingo)\b/i
+  );
+  if (dateMatch) parts.push(getApptsByDate(dateMatch[1]));
+
+  // Se menciona financeiro
+  if (/faturamento|financeiro|receita|comiss[aã]o|rendimento|lucro|ganho|caixa/.test(q)) {
+    let scope: "dia" | "semana" | "mes" = "dia";
+    if (/semana/.test(q)) scope = "semana";
+    else if (/mes|mês/.test(q)) scope = "mes";
+    parts.push(getFinancialSummary(scope));
+  }
+
+  return parts.join("\n\n");
+}
+
+// ─── System Prompt ────────────────────────────────────────
+
+function buildSystemPrompt(config: AgentV2Config): string {
+  const dateStr = new Date().toLocaleDateString("pt-BR", {
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+  return `Você é o Agente IA do ${config.salonName ?? "Domínio Pro"}.
+Data atual: ${dateStr}
+${config.businessContext ?? ""}
+
+Você gerencia agendamentos, clientes, serviços, profissionais e financeiro.
+Dados reais do sistema são fornecidos em cada mensagem — use-os com precisão.
+
+REGRAS:
+1. Responda em português brasileiro, direto e natural
+2. Você TEM ACESSO COMPLETO a clientes, serviços, profissionais, agendamentos e financeiro — os dados são fornecidos em cada mensagem
+3. Nunca diga que não tem acesso a dados — use os nomes para localizar IDs nos dados
+4. A lista de "Profissionais" e "Clientes" são SEPARADAS — não confunda
+5. Para agendar: CLIENTE recebe o serviço; PROFISSIONAL executa
+6. Se houver mais de um profissional e o usuário não informou qual, pergunte
+7. Se houver apenas um profissional, use-o automaticamente
+8. Mantenha contexto — se o cliente já foi identificado, não peça novamente
+9. Quando cliente recorrente é identificado e serviço não foi informado, SUGIRA o último serviço
+10. Use os horários de trabalho dos profissionais nos dados
+11. Quando o usuário perguntar sobre financeiro, use os dados financeiros fornecidos
+12. Se o caixa não estiver aberto e o usuário perguntar sobre financeiro, mencione isso. NUNCA bloqueie agendamentos por causa do caixa — agendamentos funcionam independente do caixa
+13. HORÁRIOS OCUPADOS: cada agendamento tem um profissional (Prof: NOME). Um horário só está ocupado para um profissional SE houver agendamento com AQUELE profissional naquele horário. Agendamentos de outros profissionais NÃO bloqueiam o horário do profissional solicitado
+14. Ao sugerir horários disponíveis, liste APENAS os horários que NÃO têm agendamento para o profissional específico solicitado
+15. NUNCA peça confirmação mais de uma vez para o mesmo agendamento — se já confirmou, execute a ação diretamente
+
+AÇÕES — inclua ao final da resposta quando executar operação:
+\`\`\`action
+{"type":"agendar","params":{"clientName":"Nome Exato","serviceId":45,"employeeId":2,"date":"hoje","time":"14:00"}}
+\`\`\`
+Tipos: agendar | cancelar | mover | concluir | criar_cliente | trocar_cliente
+- agendar: {clientName, serviceId, employeeId, date, time}
+- cancelar: {appointmentId}
+- mover: {appointmentId, newDate, newTime}
+- concluir: {appointmentId}
+- criar_cliente: {name, phone?} — use quando cliente não existe no sistema
+- trocar_cliente: {appointmentId, newClientName} — troca o cliente de um agendamento existente
+
+IMPORTANTE:
+- NÃO inclua clientId — o SISTEMA resolve o cliente pelo nome automaticamente
+- Use o nome EXATO como aparece nos dados (ex: "JOAO DA SILVA", não "João")
+- Se houver múltiplos clientes com o mesmo nome nos dados, PERGUNTE qual deles antes de agendar
+- Se cliente não existe no sistema, use criar_cliente ANTES de agendar
+- NÃO verifique conflitos — o SISTEMA faz isso automaticamente
+- SEMPRE inclua o bloco action quando tiver todos os dados necessários
+- Se falta informação, pergunte o que falta — NÃO inclua action
+- NUNCA confirme operação antes do retorno do sistema
+- NUNCA diga "realizando", "vou agendar", "efetuando" sem incluir o bloco action — isso engana o usuário
+- Se tiver todos os dados necessários, inclua o bloco action IMEDIATAMENTE sem anunciar o que vai fazer
+- date pode ser: "hoje", "amanha", "DD/MM", dia da semana, ou YYYY-MM-DD
+${buildMemoryPrompt()}`;
+}
+
+// ─── Chamada ao LLM ───────────────────────────────────────
+
+async function callLLM(
+  system: string,
+  history: AgentMessage[],
+  userMsg: string,
+  data: string,
+  config: AgentV2Config,
+): Promise<string> {
+  const messages = [
+    { role: "system", content: system },
+    { role: "system", content: `=== DADOS DO SISTEMA ===\n${data}\n=== FIM DOS DADOS ===` },
+    ...history,
+    { role: "user", content: userMsg },
+  ];
+
+  const ctrl = new AbortController();
+  const tmr = setTimeout(() => ctrl.abort(), 25_000);
+
+  try {
+    const isLocalhost =
+      typeof window !== "undefined" &&
+      ["localhost", "127.0.0.1"].includes(window.location.hostname);
+    const useProxy = !isLocalhost;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+    if (useProxy) {
+      if (config.apiToken && config.apiToken !== "proxy") {
+        headers["x-github-token"] = config.apiToken;
+      }
+    } else {
+      if (!config.apiToken || config.apiToken === "proxy") {
+        throw new Error("Token não configurado para ambiente local.");
+      }
+      headers.Authorization = `Bearer ${config.apiToken}`;
+    }
+
+    const res = await fetch(useProxy ? LLM_PROXY : LLM_ENDPOINT, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: config.model ?? "openai/gpt-4o-mini",
+        messages,
+        temperature: 0.2,
+        max_tokens: 1200,
+      }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(tmr);
+
+    if (!res.ok) {
+      if (res.status === 401)
+        throw new Error("Token inválido. Verifique seu GitHub PAT em: github.com/settings/tokens");
+      if (res.status === 429)
+        throw new Error("Limite de requisições atingido. Aguarde alguns segundos.");
+      throw new Error(`Erro ${res.status}`);
+    }
+
+    const json = await res.json();
+    return json?.choices?.[0]?.message?.content ?? "";
+  } catch (err) {
+    clearTimeout(tmr);
+    if (err instanceof DOMException && err.name === "AbortError")
+      throw new Error("Timeout — tente novamente.");
+    throw err;
+  }
+}
+
+// ─── Execução de ações ────────────────────────────────────
+
+async function executeCreateClient(params: Record<string, unknown>): Promise<string> {
+  const name = params.name ? String(params.name).trim() : null;
+  if (!name) return "Nome do cliente é obrigatório para criar o cadastro.";
+
+  // Verificar se já existe
+  const allClients = await clientsStore.ensureLoaded();
+  const exists = allClients.find(c => c.name.toLowerCase() === name.toLowerCase());
+  if (exists) return `Cliente "${exists.name}" já existe no sistema (ID:${exists.id}). Use este cliente para agendar.`;
+
+  const phone = params.phone ? String(params.phone).trim() : null;
+  const created = await clientsStore.create({
+    name,
+    phone: phone || null,
+    email: null,
+    birthDate: null,
+    cpf: null,
+    address: null,
+    notes: null,
+  });
+  window.dispatchEvent(new Event("store_updated"));
+  return `Cliente "${created.name}" criado com sucesso! ID:${created.id}. Agora pode agendar normalmente.`;
+}
+
+async function executeSwapClient(params: Record<string, unknown>): Promise<string> {
+  const apptId = Number(params.appointmentId);
+  const newClientName = params.newClientName ? String(params.newClientName).trim() : null;
+  if (!newClientName) return "Nome do novo cliente é obrigatório.";
+
+  const appt = appointmentsStore.list({}).find(a => a.id === apptId);
+  if (!appt) return `Agendamento ID:${apptId} não encontrado.`;
+
+  // Buscar novo cliente
+  const allClients = await clientsStore.ensureLoaded();
+  const nameLower = newClientName.toLowerCase();
+  let client = allClients.find(c => c.name.toLowerCase() === nameLower) ?? null;
+  if (!client) {
+    client = allClients.find(c => c.name.toLowerCase().includes(nameLower) || nameLower.includes(c.name.toLowerCase())) ?? null;
+  }
+  if (!client) {
+    try {
+      const found = await clientsStore.search(newClientName, { limit: 5 });
+      if (found.length === 1) client = found[0];
+      else if (found.length > 1) {
+        const names = found.slice(0, 5).map(c => `${c.name} (ID:${c.id})`).join(", ");
+        return `Encontrei vários clientes com "${newClientName}": ${names}. Qual deles?`;
+      }
+    } catch { /* ignorar */ }
+  }
+  if (!client) return `Cliente "${newClientName}" não encontrado. Verifique o cadastro.`;
+
+  await appointmentsStore.update(apptId, {
+    clientName: client.name,
+    clientId: client.id,
+  });
+  window.dispatchEvent(new Event("store_updated"));
+  return `Cliente trocado com sucesso!\nAgendamento ID:${apptId}\nNovo cliente: ${client.name}`;
+}
+
+async function executeAction(action: ActionPayload): Promise<string> {
+  const { type, params } = action;
+  try {
+    if (type === "agendar") return await executeSchedule(params);
+    if (type === "cancelar") return await executeCancel(params);
+    if (type === "mover") return await executeMove(params);
+    if (type === "concluir") return await executeComplete(params);
+    if (type === "criar_cliente") return await executeCreateClient(params);
+    if (type === "trocar_cliente") return await executeSwapClient(params);
+    return `Ação desconhecida: "${type}".`;
+  } catch (err) {
+    console.error("[AgentV2] Erro em executeAction:", { type, params, err });
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return `Erro ao executar "${type}": ${errMsg}`;
+  }
+}
+
+async function executeCancel(params: Record<string, unknown>): Promise<string> {
+  const apptId = Number(params.appointmentId);
+  const appt = appointmentsStore.list({}).find((a) => a.id === apptId);
+  if (!appt) return `Agendamento ID:${apptId} não encontrado.`;
+  if (appt.status === "cancelled") return `Agendamento ID:${apptId} já está cancelado.`;
+  await appointmentsStore.update(apptId, { status: "cancelled" });
+  window.dispatchEvent(new Event("store_updated"));
+  const hora = appt.startTime?.split("T")[1]?.slice(0, 5) ?? "";
+  return `Agendamento ID:${apptId} cancelado com sucesso.\nCliente: ${appt.clientName}\nHorário: ${hora}`;
+}
+
+async function executeMove(params: Record<string, unknown>): Promise<string> {
+  const apptId = Number(params.appointmentId);
+  const appt = appointmentsStore.list({}).find((a) => a.id === apptId);
+  if (!appt) return `Agendamento ID:${apptId} não encontrado.`;
+
+  const resolvedDate = resolveDate(String(params.newDate ?? ""));
+  const resolvedTime = normalizeTime(String(params.newTime ?? ""));
+  if (!resolvedTime) return `Horário inválido: "${params.newTime}". Use HH:MM.`;
+
+  const durMs = new Date(appt.endTime).getTime() - new Date(appt.startTime).getTime();
+  // Construir no horário LOCAL para evitar UTC shift
+  const [mYear, mMonth, mDay] = resolvedDate.split("-").map(Number);
+  const [mHour, mMin] = resolvedTime.split(":").map(Number);
+  const newStartDt = new Date(mYear, mMonth - 1, mDay, mHour, mMin, 0);
+  const newStart = newStartDt.toISOString().slice(0, 19);
+  const newEnd = new Date(newStartDt.getTime() + durMs).toISOString().slice(0, 19);
+
+  const emp = employeesStore.list(true).find((e) => e.id === appt.employeeId);
+  if (emp) {
+    const whCheck = isWithinWorkingHours(emp, resolvedDate, resolvedTime);
+    if (!whCheck.ok) return whCheck.message!;
+  }
+
+  // Verificar conflito
+  const conflict = appointmentsStore.list({ date: resolvedDate }).find((a) => {
+    if (a.id === appt.id || a.employeeId !== appt.employeeId || a.status === "cancelled") return false;
+    const aS = new Date(a.startTime).getTime();
+    const aE = new Date(a.endTime).getTime();
+    const rS = new Date(newStart).getTime();
+    const rE = new Date(newEnd).getTime();
+    return rS < aE && rE > aS;
+  });
+
+  if (conflict && !params.forceConflict) {
+    const cHora = conflict.startTime?.split("T")[1]?.slice(0, 5);
+    const cFim = conflict.endTime?.split("T")[1]?.slice(0, 5);
+    savePendingAction(
+      { type: "mover", params: { ...params, forceConflict: true } },
+      "conflict",
+    );
+    return `CONFLITO:${emp?.name ?? "Profissional"} já tem agendamento das ${cHora} às ${cFim} (${conflict.clientName ?? "cliente"}). Para forçar, confirme explicitamente.`;
+  }
+
+  await appointmentsStore.update(appt.id, { startTime: newStart, endTime: newEnd });
+  window.dispatchEvent(new Event("store_updated"));
+  return `Agendamento movido com sucesso!\nCliente: ${appt.clientName}\nNovo horário: ${resolvedDate} às ${resolvedTime}`;
+}
+
+async function executeComplete(params: Record<string, unknown>): Promise<string> {
+  const apptId = Number(params.appointmentId);
+  const appt = appointmentsStore.list({}).find((a) => a.id === apptId);
+  if (!appt) return `Agendamento ID:${apptId} não encontrado.`;
+  await appointmentsStore.update(apptId, { status: "completed" });
+  window.dispatchEvent(new Event("store_updated"));
+  return `Agendamento ID:${apptId} concluído!\nCliente: ${appt.clientName}`;
+}
+
+async function executeSchedule(params: Record<string, unknown>): Promise<string> {
+  // Ignorar clientId do LLM — sempre resolver pelo nome para evitar ID alucinado
+  const serviceId = params.serviceId != null ? Number(params.serviceId) : null;
+  const employeeId = params.employeeId != null ? Number(params.employeeId) : null;
+  const date = String(params.date ?? "hoje");
+  const time = String(params.time ?? "");
+  const paramClientName = params.clientName ? String(params.clientName) : null;
+
+  const resolvedDate = resolveDate(date);
+  const resolvedTime = normalizeTime(time);
+  if (!resolvedTime)
+    return `Horário inválido: "${time}". Use formato HH:MM (ex: 14:00, 9:30).`;
+
+  // 1. Localizar cliente sempre pelo nome (nunca pelo ID do LLM)
+  const allClients = await clientsStore.ensureLoaded();
+  let client: typeof allClients[0] | null = null;
+
+  if (paramClientName) {
+    const nameLower = paramClientName.toLowerCase().trim();
+
+    // 1a. Busca exata no cache
+    client = allClients.find((c) => c.name.toLowerCase() === nameLower) ?? null;
+
+    // 1b. Busca parcial no cache
+    if (!client) {
+      client = allClients.find((c) => {
+        const cn = c.name.toLowerCase();
+        return cn.includes(nameLower) || nameLower.includes(cn);
+      }) ?? null;
+    }
+
+    // 1c. Por primeiro nome no cache
+    if (!client) {
+      const firstName = nameLower.split(" ")[0];
+      if (firstName.length > 2) {
+        const matches = allClients.filter((c) => c.name.toLowerCase().includes(firstName));
+        if (matches.length === 1) {
+          client = matches[0];
+        } else if (matches.length > 1) {
+          const names = matches.slice(0, 5).map((c) => `${c.name} (ID:${c.id})`).join(", ");
+          return `Encontrei vários clientes com "${paramClientName}": ${names}. Qual deles?`;
+        }
+      }
+    }
+
+    // 1d. Fallback: busca direto no Supabase (garante que acha mesmo fora do cache)
+    if (!client) {
+      console.log("[agentV2] Cliente não achado no cache, buscando no Supabase:", paramClientName);
+      try {
+        const found = await clientsStore.search(paramClientName, { limit: 10 });
+        if (found.length === 1) {
+          client = found[0];
+        } else if (found.length > 1) {
+          const names = found.slice(0, 5).map((c) => `${c.name} (ID:${c.id})`).join(", ");
+          return `Encontrei vários clientes com "${paramClientName}": ${names}. Qual deles?`;
+        }
+      } catch (err) {
+        console.warn("[agentV2] Busca Supabase falhou em executeSchedule:", err);
+      }
+    }
+  }
+
+  if (!client) {
+    return `Cliente "${paramClientName ?? "desconhecido"}" não encontrado no sistema. Verifique o cadastro.`;
+  }
+
+  // 2. Localizar serviço
+  const svc = serviceId
+    ? servicesStore.list(true).find((s) => s.id === serviceId) ?? null
+    : null;
+  if (!svc) {
+    const svcs = servicesStore.list(true);
+    if (svcs.length === 0) return "Nenhum serviço cadastrado no sistema.";
+    return `Serviço ID:${serviceId} não encontrado. Disponíveis: ${svcs.map((s) => `${s.name} (ID:${s.id})`).join(", ")}`;
+  }
+
+  // 3. Localizar profissional
+  const emps = employeesStore.list(true);
+  if (emps.length === 0) return "Nenhum profissional ativo no sistema.";
+
+  let emp: Employee | null = employeeId
+    ? emps.find((e) => e.id === employeeId) ?? null
+    : null;
+  if (!emp && emps.length === 1) emp = emps[0];
+  if (!emp) {
+    savePendingAction(
+      { type: "agendar", params: { ...params } },
+      "professional",
+    );
+    const lista = emps.map((e) => `${e.name} (ID:${e.id})`).join(", ");
+    return `AGUARDANDO_PROFISSIONAL:${lista}`;
+  }
+
+  // 4. Validar horário de trabalho
+  const whCheck = isWithinWorkingHours(emp, resolvedDate, resolvedTime);
+  if (!whCheck.ok) return whCheck.message!;
+
+  // 5. Calcular horários
+  const durationMinutes = svc.durationMinutes > 0 ? svc.durationMinutes : 60;
+  // Construir data no horário LOCAL (sem UTC shift) para exibição correta na agenda
+  const [rYear, rMonth, rDay] = resolvedDate.split("-").map(Number);
+  const [rHour, rMin] = resolvedTime.split(":").map(Number);
+  const startDt = new Date(rYear, rMonth - 1, rDay, rHour, rMin, 0);
+  const endDt = new Date(startDt.getTime() + durationMinutes * 60_000);
+  const startTime = startDt.toISOString().slice(0, 19);
+  const endTime = endDt.toISOString().slice(0, 19);
+
+  // 6. Verificar conflito
+  const conflict = appointmentsStore.list({ date: resolvedDate }).find((a) => {
+    if (a.employeeId !== emp!.id || a.status === "cancelled") return false;
+    const aS = new Date(a.startTime).getTime();
+    const aE = new Date(a.endTime).getTime();
+    const rS = new Date(startTime).getTime();
+    const rE = new Date(endTime).getTime();
+    return rS < aE && rE > aS;
+  });
+
+  if (conflict && !params.forceConflict) {
+    const conflictHour = conflict.startTime?.split("T")[1]?.slice(0, 5);
+    const conflictEnd = conflict.endTime?.split("T")[1]?.slice(0, 5);
+    savePendingAction(
+      { type: "agendar", params: { ...params, forceConflict: true } },
+      "conflict",
+    );
+    return `CONFLITO:${emp.name} já tem agendamento das ${conflictHour} às ${conflictEnd} (${conflict.clientName ?? "cliente"}). Para forçar mesmo assim, confirme explicitamente.`;
+  }
+
+  // 7. Criar agendamento
+  const serviceData: AppointmentService = {
+    serviceId: svc.id,
+    name: svc.name,
+    price: svc.price,
+    durationMinutes: svc.durationMinutes ?? 60,
+    color: svc.color ?? "#ec4899",
+    materialCostPercent: svc.materialCostPercent ?? 0,
+  };
+
+  const created = await appointmentsStore.create({
+    clientName: client.name,
+    clientId: client.id,
+    employeeId: emp.id,
+    startTime,
+    endTime,
+    status: "scheduled",
+    totalPrice: svc.price,
+    notes: null,
+    paymentStatus: null,
+    groupId: null,
+    services: [serviceData],
+  });
+
+  if (!created || !created.id) {
+    return "Erro ao criar agendamento no banco. Verifique os dados e tente novamente.";
+  }
+
+  window.dispatchEvent(new Event("store_updated"));
+  refreshPreferences();
+
+  return [
+    "Agendamento criado com sucesso!",
+    `ID: ${created.id}`,
+    `Cliente: ${client.name}`,
+    `Serviço: ${svc.name} (${durationMinutes}min)`,
+    `Data: ${resolvedDate} às ${resolvedTime}`,
+    `Profissional: ${emp.name}`,
+  ].join("\n");
+}
+
+// ─── Helpers de detecção ──────────────────────────────────
+
+function isLikelyActionRequest(text: string): boolean {
+  return /\b(agendar|marcar|agenda|cancelar|desmarcar|reagendar|mover|remarcar|concluir|finalizar)\b/i.test(text);
+}
+
+function claimsActionSuccess(text: string): boolean {
+  return /\b(agendei|agendado com sucesso|marquei|cancelei|cancelado com sucesso|movi|reagendei|conclui|concluido com sucesso|feito|realizando o agendamento|vou agendar|agendamento realizado|efetuando|executando|processando o agendamento)\b/i.test(text);
+}
+
+// ─── Configuração e API pública ───────────────────────────
+
+let cfg: AgentV2Config | null = null;
+
+export function initAgentV2(config: AgentV2Config): void {
+  cfg = config;
+}
+
+export async function handleMessageV2(userMessage: string): Promise<AgentV2Response> {
+  if (!cfg) return { text: "Agente não configurado." };
+
+  try {
+
+  const msgTrimmed = userMessage.trim();
+
+  // ── 1. Verificar ação pendente (conflito ou profissional) ──
+  const pending = loadPendingAction();
+  if (pending) {
+    const result = await handlePendingAction(pending, msgTrimmed);
+    if (result) return result;
+  }
+
+  // ── 2. Detectar comando de ensino (regra explícita) ──
+  const teachIntent = detectTeachingIntent(msgTrimmed);
+  if (teachIntent) {
+    const rule = addRule(teachIntent);
+    const confirmation = `Entendido! Vou lembrar disso sempre:\n"${rule.raw}"`;
+    addToHistory("user", msgTrimmed);
+    addToHistory("assistant", confirmation);
+    return { text: confirmation };
+  }
+
+  // ── 3. Fluxo normal: LLM + execução de ação ──
+  addToHistory("user", msgTrimmed);
+  const history = loadHistory().slice(0, -1);
+  let systemData = "(dados indisponíveis)";
+  try {
+    systemData = await gatherData(msgTrimmed);
+  } catch (err) {
+    console.warn("[agentV2] gatherData falhou, prosseguindo sem dados:", err);
+  }
+
+  console.log("[agentV2] gatherData OK, chamando LLM...");
+
+  let raw: string;
+  try {
+    raw = await callLLM(buildSystemPrompt(cfg), history, msgTrimmed, systemData, cfg);
+  } catch (err) {
+    console.warn("[agentV2] callLLM falhou:", err);
+    const errText = `Erro: ${err instanceof Error ? err.message : "Tente novamente."}`;
+    return { text: errText };
+  }
+
+  // Extrair e executar ação
+  let text = raw;
+  let actionExecuted = false;
+  let navigateTo: string | undefined;
+
+  const match = raw.match(/```action\s*([\s\S]*?)```/);
+  if (match) {
+    try {
+      const act: ActionPayload = JSON.parse(match[1]);
+      const result = await executeAction(act);
+
+      if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+        const lista = result.replace("AGUARDANDO_PROFISSIONAL:", "");
+        text = `Com qual profissional deseja agendar? Disponíveis: ${lista}`;
+      } else if (result.startsWith("CONFLITO:")) {
+        const detalhe = result.replace("CONFLITO:", "");
+        text = `Conflito de horário: ${detalhe}\nDeseja agendar mesmo assim? Responda "sim" ou "forçar" para confirmar.`;
+      } else {
+        text = result;
+        actionExecuted =
+          result.includes("criado com sucesso") ||
+          result.includes("cancelado com sucesso") ||
+          result.includes("movido com sucesso") ||
+          result.includes("concluído");
+        if (actionExecuted && (act.type === "agendar" || act.type === "mover")) {
+          navigateTo = "/agenda";
+        }
+      }
+    } catch (err) {
+      text = `Erro ao processar ação: ${err instanceof Error ? err.message : "Desconhecido"}`;
+      console.error("[AgentV2] Erro ao processar ação:", err);
+    }
+  } else if (isLikelyActionRequest(msgTrimmed)) {
+    if (claimsActionSuccess(raw)) {
+      // LLM afirmou ter feito mas não gerou o bloco action — forçar extração via segunda chamada
+      console.log("[agentV2] LLM não gerou action, tentando extração forçada...");
+      try {
+        const forceRaw = await callLLM(
+          `Você é um extrator de JSON. Analise a conversa e extraia os dados do agendamento em formato JSON exato.
+Responda APENAS com o JSON, sem texto adicional, sem explicações, sem markdown.
+Formato obrigatório: {"type":"agendar","params":{"clientName":"NOME","serviceId":0,"employeeId":0,"date":"YYYY-MM-DD","time":"HH:MM"}}
+Se não tiver todos os dados, responda: {}`,
+          [],
+          `Contexto: ${msgTrimmed}\nResposta do assistente: ${raw}\nDados do sistema: ${systemData}`,
+          "",
+          cfg,
+        );
+        const cleaned = forceRaw.replace(/```[\s\S]*?```/g, "").trim();
+        if (cleaned && cleaned !== "{}") {
+          const act: ActionPayload = JSON.parse(cleaned);
+          if (act.type && act.params) {
+            const result = await executeAction(act);
+            if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+              text = `Com qual profissional deseja agendar? Disponíveis: ${result.replace("AGUARDANDO_PROFISSIONAL:", "")}`;
+            } else if (result.startsWith("CONFLITO:")) {
+              text = `Conflito de horário: ${result.replace("CONFLITO:", "")}\nDeseja agendar mesmo assim?`;
+            } else {
+              text = result;
+              actionExecuted = result.includes("criado com sucesso") || result.includes("cancelado com sucesso") || result.includes("movido com sucesso");
+              if (actionExecuted && (act.type === "agendar" || act.type === "mover")) navigateTo = "/agenda";
+            }
+          } else {
+            text = raw.replace(/```[\s\S]*?```/g, "").trim();
+          }
+        } else {
+          text = raw.replace(/```[\s\S]*?```/g, "").trim();
+        }
+      } catch {
+        text = raw.replace(/```[\s\S]*?```/g, "").trim();
+      }
+    } else {
+      text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
+    }
+  }
+
+  addToHistory("assistant", text);
+  const msgId = `m_${Date.now()}`;
+  return { text, actionExecuted, navigateTo, messageId: msgId, userMessage: msgTrimmed };
+
+  } catch (outerErr) {
+    console.error("[agentV2] Erro inesperado em handleMessageV2:", outerErr);
+    return { text: `Erro inesperado: ${outerErr instanceof Error ? outerErr.message : "Tente novamente."}` };
+  }
+}
+
+// ─── Handler de ações pendentes ───────────────────────────
+
+async function handlePendingAction(
+  pending: PendingAction,
+  msgTrimmed: string,
+): Promise<AgentV2Response | null> {
+  // ─ Conflito: usuário confirmando ─
+  if (pending.type === "conflict") {
+    if (/forç|forcar|força|mesmo\s*assim|pode|sim|confirma|confirmar|ok|claro|vai|manda|force|agendar/i.test(msgTrimmed)) {
+      clearPendingAction();
+      addToHistory("user", msgTrimmed);
+      const result = await executeAction(pending.action);
+
+      if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+        const lista = result.replace("AGUARDANDO_PROFISSIONAL:", "");
+        const aviso = `Com qual profissional deseja agendar? Disponíveis: ${lista}`;
+        addToHistory("assistant", aviso);
+        return { text: aviso, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+      }
+
+      addToHistory("assistant", result);
+      const isSuccess = result.includes("criado com sucesso") || result.includes("movido com sucesso");
       return {
-        START_HOUR:   isNaN(startH) ? 7  : startH,
-        END_HOUR:     isNaN(endH)   ? 21 : endH,
-        SNAP_MINUTES: isNaN(snap)   ? 15 : snap,
+        text: result,
+        actionExecuted: isSuccess,
+        navigateTo: isSuccess ? "/agenda" : undefined,
+        messageId: `m_${Date.now()}`,
+        userMessage: msgTrimmed,
       };
     }
-  } catch { /* ignore */ }
-  return { START_HOUR: 7, END_HOUR: 21, SNAP_MINUTES: 15 };
-}
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function timeToPixels(date: Date, startHour: number): number {
-  return (date.getHours() + date.getMinutes() / 60 - startHour) * HOUR_HEIGHT;
-}
-
-function durationToPixels(start: Date, end: Date): number {
-  return ((end.getTime() - start.getTime()) / 3_600_000) * HOUR_HEIGHT;
-}
-
-function snapToGrid(minutes: number, snapMinutes: number): number {
-  return Math.round(minutes / snapMinutes) * snapMinutes;
-}
-
-const STATUS_BORDER: Record<string, string> = {
-  scheduled:   "border-l-blue-400",
-  confirmed:   "border-l-emerald-400",
-  in_progress: "border-l-amber-400",
-  completed:   "border-l-green-400",
-  cancelled:   "border-l-red-400",
-  no_show:     "border-l-gray-400",
-};
-
-// ─── AppointmentBlock ─────────────────────────────────────────────────────────
-const LONG_PRESS_MS = 500;
-
-const AppointmentBlock = memo(function AppointmentBlock({
-  appt,
-  color,
-  isGrouped,
-  onClick,
-  onDragStart,
-  startHour,
-}: {
-  appt: Appointment;
-  color: string;
-  isGrouped: boolean;
-  onClick: () => void;
-  onDragStart: (appt: Appointment, y: number, x: number) => void;
-  startHour: number;
-}) {
-  const start  = new Date(appt.startTime);
-  const end    = new Date(appt.endTime);
-  const top    = timeToPixels(start, startHour);
-  const height = Math.max(durationToPixels(start, end), 28);
-
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pointerStart   = useRef<{ y: number; x: number } | null>(null);
-  const dragReady      = useRef(false); // long press concluído
-  const didDrag        = useRef(false); // drag efetivamente iniciado
-  const [pressing, setPressing] = useState(false); // feedback visual
-
-  const cancelLongPress = useCallback(() => {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-    pointerStart.current = null;
-    dragReady.current = false;
-    setPressing(false);
-  }, []);
-
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    if (e.button !== 0 && e.pointerType === "mouse") return;
-    e.stopPropagation();
-    didDrag.current = false;  // zera aqui, não no pointerup
-    dragReady.current = false;
-    pointerStart.current = { y: e.clientY, x: e.clientX };
-    e.currentTarget.setPointerCapture(e.pointerId);
-
-    if (e.pointerType === "mouse") {
-      // Mouse: ativa drag direto ao mover, sem long press
-      dragReady.current = true;
-    } else {
-      // Touch: long press de 500ms com feedback visual
-      setPressing(true);
-      longPressTimer.current = setTimeout(() => {
-        dragReady.current = true;
-        setPressing(false);
-        if (navigator.vibrate) navigator.vibrate(40);
-      }, LONG_PRESS_MS);
-    }
-  }, []);
-
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    if (!pointerStart.current) return;
-    const dy = e.clientY - pointerStart.current.y;
-    const dx = e.clientX - pointerStart.current.x;
-    const dist = Math.sqrt(dy * dy + dx * dx);
-
-    // Touch: se mover mais de 10px antes do long press, cancela (vira scroll)
-    if (e.pointerType !== "mouse" && !dragReady.current && dist > 10) {
-      cancelLongPress();
-      return;
+    if (/nao|não|cancela|deixa|esquece|outro|nada/i.test(msgTrimmed)) {
+      clearPendingAction();
+      addToHistory("user", msgTrimmed);
+      const cancelMsg = "Ok, agendamento não realizado. Como posso ajudar?";
+      addToHistory("assistant", cancelMsg);
+      return { text: cancelMsg, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
     }
 
-    // Drag ativo — inicia ao mover
-    if (dragReady.current && !didDrag.current && dist > 4) {
-      didDrag.current = true;
-      onDragStart(appt, pointerStart.current.y, pointerStart.current.x);
-    }
-  }, [appt, onDragStart, cancelLongPress]);
-
-  const handlePointerUp = useCallback(() => {
-    cancelLongPress();
-    // Não zera didDrag.current aqui — o onClick do React dispara DEPOIS do pointerup
-    // e precisa checar se houve drag. Zeramos no próximo pointerdown.
-  }, [cancelLongPress]);
-
-  return (
-    <div
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={cancelLongPress}
-      onClick={(e) => { e.stopPropagation(); if (!didDrag.current) onClick(); }}
-      style={{
-        position: "absolute",
-        top: `${top}px`,
-        height: `${height}px`,
-        left: "3px",
-        right: "3px",
-        backgroundColor: color + "25",
-        borderLeft: `3px solid ${color}`,
-        zIndex: 10,
-        touchAction: "none",
-        transition: pressing ? "none" : "transform 0.15s, box-shadow 0.15s",
-        transform: pressing ? "scale(0.97)" : "scale(1)",
-        boxShadow: pressing ? `0 0 0 2px ${color}88` : "none",
-      }}
-      className={cn(
-        "rounded-md px-2 py-1 cursor-grab active:cursor-grabbing select-none overflow-hidden",
-        "hover:brightness-110 transition-all",
-        STATUS_BORDER[appt.status] ?? "border-l-gray-400"
-      )}
-    >
-      <div className="flex items-center gap-1">
-        {/* Se tem exatamente 1 serviço, mostra o nome do serviço em destaque */}
-        {appt.services?.length === 1 ? (
-          <p className="text-xs font-semibold truncate flex-1" style={{ color }}>
-            {appt.services[0].name}
-          </p>
-        ) : (
-          <p className="text-xs font-semibold truncate flex-1" style={{ color }}>
-            {appt.clientName ?? "Sem nome"}
-          </p>
-        )}
-        {isGrouped && (
-          <Link2 className="w-2.5 h-2.5 flex-shrink-0 opacity-70" style={{ color }} />
-        )}
-      </div>
-      {/* Nome do cliente (secundário) */}
-      {height > 36 && (
-        <p className="text-[10px] text-muted-foreground truncate leading-tight">
-          {appt.clientName ?? "Sem nome"}
-        </p>
-      )}
-      {height > 52 && (
-        <p className="text-xs text-muted-foreground flex items-center gap-0.5">
-          <Clock className="w-2.5 h-2.5" />
-          {format(start, "HH:mm")}–{format(end, "HH:mm")}
-        </p>
-      )}
-      {height > 70 && appt.totalPrice != null && (
-        <p className="text-xs text-muted-foreground">
-          R$ {appt.totalPrice.toFixed(2)}
-        </p>
-      )}
-    </div>
-  );
-});
-
-// ─── EmployeeColumn ───────────────────────────────────────────────────────────
-const EmployeeColumn = memo(function EmployeeColumn({
-  employee,
-  appointments,
-  serviceMap,
-  groupIds,
-  isDragOver,
-  onColumnClick,
-  onAppointmentClick,
-  onDragStart,
-  startHour,
-  totalHours,
-  snapMinutes,
-}: {
-  employee: { id: number; name: string; color: string; photoUrl?: string | null };
-  appointments: Appointment[];
-  serviceMap: Map<number, { color: string }>;
-  groupIds: Set<string>;
-  isDragOver: boolean;
-  onColumnClick: (empId: number, hour: number, minute: number) => void;
-  onAppointmentClick: (appt: Appointment) => void;
-  onDragStart: (appt: Appointment, y: number, x: number) => void;
-  startHour: number;
-  totalHours: number;
-  snapMinutes: number;
-}) {
-  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    // Calcula os minutos desde o início do dia baseado na posição Y
-    const minutesFromStart = (y / HOUR_HEIGHT) * 60;
-    // Arredonda para o snap mais próximo
-    const snappedMinutes = snapToGrid(minutesFromStart, snapMinutes);
-    // Calcula hora e minuto corretamente
-    const hour = startHour + Math.floor(snappedMinutes / 60);
-    const minute = snappedMinutes % 60;
-    onColumnClick(employee.id, hour, minute);
-  }, [employee.id, onColumnClick, startHour, snapMinutes]);
-
-  return (
-    <div
-      className={cn(
-        "relative border-l border-border transition-colors",
-        isDragOver && "bg-primary/8"
-      )}
-      style={{ height: `${totalHours * HOUR_HEIGHT}px`, width: `${MIN_COL_WIDTH}px` }}
-      onClick={handleClick}
-    >
-      {Array.from({ length: totalHours }, (_, i) => (
-        <div key={i} className="absolute w-full border-t border-border/60"
-          style={{ top: `${i * HOUR_HEIGHT}px` }} />
-      ))}
-      {Array.from({ length: totalHours }, (_, i) => (
-        <div key={`h${i}`} className="absolute w-full border-t border-border/20 border-dashed"
-          style={{ top: `${i * HOUR_HEIGHT + HOUR_HEIGHT / 2}px` }} />
-      ))}
-      {/* Linha do horário atual — pointer-events:none para não bloquear cliques */}
-      <NowLine startHour={startHour} totalHours={totalHours} />
-      {appointments.map(appt => {
-        const firstSvcId = appt.services?.[0]?.serviceId;
-        const color = firstSvcId
-          ? (serviceMap.get(firstSvcId)?.color ?? employee.color)
-          : employee.color;
-        const isGrouped = !!(appt.groupId && groupIds.has(appt.groupId));
-        return (
-          <AppointmentBlock
-            key={appt.id}
-            appt={appt}
-            color={color}
-            isGrouped={isGrouped}
-            onClick={() => onAppointmentClick(appt)}
-            onDragStart={onDragStart}
-            startHour={startHour}
-          />
-        );
-      })}
-    </div>
-  );
-});
-
-// ─── useAccentColor — lê a cor de acento do salon_config ─────────────────────
-function useAccentColor(): string {
-  const [accent, setAccent] = useState(() => {
-    try {
-      const s = localStorage.getItem("salon_config");
-      if (s) return JSON.parse(s).accentColor || "#ec4899";
-    } catch { /* ignore */ }
-    return "#ec4899";
-  });
-  useEffect(() => {
-    const onUpdate = () => {
-      try {
-        const s = localStorage.getItem("salon_config");
-        if (s) setAccent(JSON.parse(s).accentColor || "#ec4899");
-      } catch { /* ignore */ }
-    };
-    window.addEventListener("salon_config_updated", onUpdate);
-    return () => window.removeEventListener("salon_config_updated", onUpdate);
-  }, []);
-  return accent;
-}
-
-// ─── NowLine — linha vermelha do horário atual ────────────────────────────────
-function NowLine({ startHour, totalHours }: { startHour: number; totalHours: number }) {
-  const accent = useAccentColor();
-  const [top, setTop] = useState<number | null>(null);
-
-  const calcTop = useCallback(() => {
-    const now = new Date();
-    const rel = (now.getHours() + now.getMinutes() / 60) - startHour;
-    return (rel >= 0 && rel <= totalHours) ? rel * HOUR_HEIGHT : null;
-  }, [startHour, totalHours]);
-
-  useEffect(() => {
-    setTop(calcTop());
-    const id = setInterval(() => setTop(calcTop()), 60_000);
-    return () => clearInterval(id);
-  }, [calcTop]);
-
-  if (top === null) return null;
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: `${top}px`,
-        left: 0, right: 0,
-        display: "flex",
-        alignItems: "center",
-        pointerEvents: "none",
-        zIndex: 15,
-      }}
-    >
-      <div style={{
-        width: 9, height: 9,
-        borderRadius: "50%",
-        backgroundColor: accent,
-        flexShrink: 0,
-        marginLeft: -4.5,
-        boxShadow: `0 0 0 3px ${accent}44, 0 0 8px ${accent}99`,
-      }} />
-      <div style={{
-        height: 1.5,
-        flex: 1,
-        background: `linear-gradient(to right, ${accent} 0%, ${accent}55 50%, transparent 100%)`,
-      }} />
-    </div>
-  );
-}
-
-// ─── DragGhost ────────────────────────────────────────────────────────────────
-function DragGhost({ appt, x, y }: { appt: Appointment; x: number; y: number }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: x - 60,
-        top: y - 20,
-        zIndex: 9999,
-        pointerEvents: "none",
-        minWidth: 120,
-      }}
-      className="bg-card border border-primary rounded-md px-3 py-2 shadow-2xl text-sm font-medium opacity-90"
-    >
-      {appt.clientName ?? "Sem nome"}
-    </div>
-  );
-}
-
-// ─── AgendaPage ───────────────────────────────────────────────────────────────
-export default function AgendaPage() {
-  const [selectedDate, setSelectedDate]   = useState(() => format(new Date(), "yyyy-MM-dd"));
-  const [modalOpen, setModalOpen]         = useState(false);
-  const [editingAppt, setEditingAppt]     = useState<Appointment | null>(null);
-  const [defaultEmpId, setDefaultEmpId]   = useState<number | undefined>();
-  const [defaultHour, setDefaultHour]     = useState(9);
-  const [defaultMinute, setDefaultMinute] = useState(0);
-  const [groupClientName, setGroupClientName] = useState<string | undefined>();
-  const [groupId, setGroupId]             = useState<string | undefined>();
-  const [refreshKey, setRefreshKey]       = useState(0);
-  const [refreshing, setRefreshing]       = useState(false);
-
-  // Escutar evento do agente IA e outras atualizações do store
-  useEffect(() => {
-    const onStoreUpdate = async () => {
-      // Rebusca dados do Supabase para garantir que o cache está atualizado
-      try { await fetchAllData(); } catch { /* ignorar */ }
-      setRefreshKey(k => k + 1);
-    };
-    window.addEventListener("store_updated", onStoreUpdate);
-    window.addEventListener("appointments_updated", onStoreUpdate);
-    return () => {
-      window.removeEventListener("store_updated", onStoreUpdate);
-      window.removeEventListener("appointments_updated", onStoreUpdate);
-    };
-  }, []);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      // Rebusca todos os dados do Supabase sem recarregar a página
-      await fetchAllData();
-      setRefreshKey(k => k + 1);
-    } catch (err) {
-      console.error("Erro ao atualizar:", err);
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-
-  // Horários/slots dinâmicos vindos de Configurações
-  const [schedCfg, setSchedCfg] = useState(loadScheduleConfig);
-  const { START_HOUR, END_HOUR, SNAP_MINUTES } = schedCfg;
-  const TOTAL_HOURS = END_HOUR - START_HOUR;
-
-  useEffect(() => {
-    const onUpdate = () => setSchedCfg(loadScheduleConfig());
-    window.addEventListener("salon_config_updated", onUpdate);
-    return () => window.removeEventListener("salon_config_updated", onUpdate);
-  }, []);
-
-  // Drag state
-  const [dragging, setDragging]           = useState<Appointment | null>(null);
-  const [dragPos, setDragPos]             = useState({ x: 0, y: 0 });
-  const [dragOverEmpId, setDragOverEmpId] = useState<number | null>(null);
-  const dragStartY   = useRef(0);
-  const dragStartX   = useRef(0);
-  const dragOffsetY  = useRef(0); // offset do toque dentro do bloco arrastado
-  const gridRef     = useRef<HTMLDivElement>(null);
-
-  const employees = useMemo(() => employeesStore.list(true), [refreshKey]);
-  const appointments = useMemo(() => appointmentsStore.list({ date: selectedDate }), [selectedDate, refreshKey]);
-  const servicesData = useMemo(() => servicesStore.list(true), [refreshKey]);
-
-  const serviceMap = useMemo(
-    () => new Map(servicesData.map(s => [s.id, { color: s.color }])),
-    [servicesData]
-  );
-
-  const apptsByEmployee = useMemo(() =>
-    employees.reduce((acc, emp) => {
-      acc[emp.id] = appointments.filter(a => a.employeeId === emp.id);
-      return acc;
-    }, {} as Record<number, Appointment[]>),
-    [employees, appointments]
-  );
-
-  // Detect real groups (groupId appearing in 2+ appointments)
-  const groupIds = useMemo(() => {
-    const counts: Record<string, number> = {};
-    appointments.forEach(a => {
-      if (a.groupId) counts[a.groupId] = (counts[a.groupId] ?? 0) + 1;
-    });
-    return new Set(
-      Object.entries(counts).filter(([, v]) => v > 1).map(([k]) => k)
-    );
-  }, [appointments]);
-
-  const currentDate   = useMemo(() => parseISO(selectedDate), [selectedDate]);
-  const formattedDate = format(currentDate, "EEEE, d 'de' MMMM 'de' yyyy", { locale: ptBR });
-
-  // ── Find employee column at X ─────────────────────────────────────────────
-  const getEmpAtX = useCallback((clientX: number): number | null => {
-    if (!gridRef.current) return null;
-    const cols = Array.from(gridRef.current.querySelectorAll<HTMLElement>("[data-emp-id]"));
-    for (let i = 0; i < cols.length; i++) {
-      const rect = cols[i].getBoundingClientRect();
-      if (clientX >= rect.left && clientX <= rect.right) {
-        return parseInt(cols[i].dataset.empId ?? "0", 10);
-      }
-    }
+    clearPendingAction();
     return null;
-  }, []);
+  }
 
-  // ── Global pointer events while dragging ──────────────────────────────────
-  useEffect(() => {
-    if (!dragging) return;
+  // ─ Profissional: usuário escolhendo ─
+  if (pending.type === "professional") {
+    const emps = employeesStore.list(true);
+    const empName = msgTrimmed.toLowerCase();
 
-    const onMove = (e: PointerEvent) => {
-      setDragPos({ x: e.clientX, y: e.clientY });
-      setDragOverEmpId(getEmpAtX(e.clientX));
-    };
+    const emp = emps.find(
+      (e) =>
+        e.name.toLowerCase() === empName ||
+        e.name.toLowerCase().includes(empName) ||
+        empName.includes(e.name.toLowerCase()),
+    ) ?? null;
 
-    const onUp = async (e: PointerEvent) => {
-      if (!dragging) return;
+    if (emp) {
+      clearPendingAction();
+      addToHistory("user", msgTrimmed);
+      const updatedAction: ActionPayload = {
+        ...pending.action,
+        params: { ...pending.action.params, employeeId: emp.id },
+      };
+      const result = await executeAction(updatedAction);
 
-      try {
-        const targetEmpId = getEmpAtX(e.clientX);
-        if (!targetEmpId) {
-          setDragging(null);
-          setDragOverEmpId(null);
-          return;
-        }
-
-        const rect = gridRef.current?.querySelector<HTMLElement>(`[data-emp-id="${targetEmpId}"]`)?.getBoundingClientRect();
-        if (!rect) {
-          setDragging(null);
-          setDragOverEmpId(null);
-          return;
-        }
-
-        // Subtrai o offset interno para alinhar ao topo do bloco, não ao dedo
-        const y = e.clientY - rect.top - dragOffsetY.current;
-        // Calcula os minutos desde o início do dia baseado na posição Y
-        const minutesFromStart = (y / HOUR_HEIGHT) * 60;
-        // Arredonda para o snap mais próximo
-        const snappedMinutes = snapToGrid(minutesFromStart, SNAP_MINUTES);
-        // Calcula hora e minuto corretamente
-        const hour = START_HOUR + Math.floor(snappedMinutes / 60);
-        const minute = snappedMinutes % 60;
-
-        const newStart = new Date(currentDate);
-        newStart.setHours(hour, minute, 0, 0);
-        const duration = (new Date(dragging.endTime).getTime() - new Date(dragging.startTime).getTime()) / 1000 / 60;
-        const newEnd = new Date(newStart.getTime() + duration * 60_000);
-
-        // Atualiza cache local imediatamente
-        appointmentsStore.updateLocal(dragging.id, {
-          employeeId: targetEmpId,
-          startTime: newStart.toISOString(),
-          endTime: newEnd.toISOString(),
-        });
-        setRefreshKey(k => k + 1);
-
-        // Persiste no Supabase em background
-        try {
-          await appointmentsStore.move(dragging.id, targetEmpId, newStart.toISOString(), newEnd.toISOString());
-          toast.success("Agendamento reagendado!");
-        } catch {
-          toast.error("Erro ao mover — revertendo");
-          // Reverte: restaura posição original no cache
-          appointmentsStore.updateLocal(dragging.id, {
-            employeeId: dragging.employeeId,
-            startTime: dragging.startTime,
-            endTime: dragging.endTime,
-          });
-          setRefreshKey(k => k + 1);
-        }
-      } finally {
-        // SEMPRE limpa o estado de drag ao final, mesmo se houver erro
-        setDragging(null);
-        setDragOverEmpId(null);
+      if (result.startsWith("CONFLITO:")) {
+        const detalhe = result.replace("CONFLITO:", "");
+        const aviso = `Conflito de horário: ${detalhe}\nDeseja agendar mesmo assim? Responda "sim" para confirmar.`;
+        addToHistory("assistant", aviso);
+        return { text: aviso, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
       }
-    };
 
-    const onCancel = () => {
-      setDragging(null);
-      setDragOverEmpId(null);
-    };
+      if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+        const lista = result.replace("AGUARDANDO_PROFISSIONAL:", "");
+        const aviso = `Com qual profissional deseja agendar? Disponíveis: ${lista}`;
+        addToHistory("assistant", aviso);
+        return { text: aviso, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+      }
 
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-    };
-  }, [dragging, getEmpAtX, START_HOUR, END_HOUR, SNAP_MINUTES, currentDate]);
-
-  // ── Drag start ────────────────────────────────────────────────────────────
-  const handleDragStart = useCallback((appt: Appointment, y: number, x: number) => {
-    setDragging(appt);
-    setDragPos({ x, y });
-    dragStartY.current = y;
-    dragStartX.current = x;
-
-    // Calcula o offset interno: quantos pixels abaixo do topo do bloco o usuário tocou
-    // Isso serve para que ao soltar, o horário reflita o topo do bloco, não o dedo
-    const apptStart = new Date(appt.startTime);
-    const empCol = gridRef.current?.querySelector<HTMLElement>(`[data-emp-id="${appt.employeeId}"]`);
-    if (empCol) {
-      const colRect = empCol.getBoundingClientRect();
-      const yInCol = y - colRect.top;
-      const apptTopInCol = timeToPixels(apptStart, START_HOUR);
-      dragOffsetY.current = yInCol - apptTopInCol;
-    } else {
-      dragOffsetY.current = 0;
+      addToHistory("assistant", result);
+      const isSuccess = result.includes("criado com sucesso");
+      return {
+        text: result,
+        actionExecuted: isSuccess,
+        navigateTo: isSuccess ? "/agenda" : undefined,
+        messageId: `m_${Date.now()}`,
+        userMessage: msgTrimmed,
+      };
     }
-  }, [START_HOUR]);
 
-  // ── Modal helpers ─────────────────────────────────────────────────────────
-  const openNew = useCallback((empId: number, hour: number, minute = 0) => {
-    setEditingAppt(null);
-    setDefaultEmpId(empId);
-    setDefaultHour(hour);
-    setDefaultMinute(minute);
-    setGroupClientName(undefined);
-    setGroupId(undefined);
-    setModalOpen(true);
-  }, []);
+    clearPendingAction();
+    return null;
+  }
 
-  const openEdit = useCallback((appt: Appointment) => {
-    setEditingAppt(appt);
-    setGroupClientName(undefined);
-    setGroupId(undefined);
-    setModalOpen(true);
-  }, []);
+  return null;
+}
 
-  // Called from AppointmentModal when user clicks "Adicionar outro serviço"
-  const openGroupAdd = useCallback((clientName: string, existingGroupId: string) => {
-    setEditingAppt(null);
-    setDefaultEmpId(undefined);
-    setDefaultHour(9);
-    setDefaultMinute(0);
-    setGroupClientName(clientName);
-    setGroupId(existingGroupId);
-    setRefreshKey(k => k + 1);
-    setModalOpen(true);
-  }, []);
+// ─── Re-export de feedback ────────────────────────────────
 
-  const navigateDate = (dir: number) =>
-    setSelectedDate(format(dir > 0 ? addDays(currentDate, 1) : subDays(currentDate, 1), "yyyy-MM-dd"));
+export function addFeedback(userMessage: string, agentResponse: string, rating: "good" | "bad"): void {
+  memoryAddFeedback(userMessage, agentResponse, rating);
+}
 
-  const completedCount = appointments.filter(a => a.status === "completed").length;
-  const [showDatePicker, setShowDatePicker] = useState(false);
+// ─── Teste de conexão ─────────────────────────────────────
 
-  return (
-    <div className="flex flex-col h-full" style={{ userSelect: dragging ? "none" : undefined }}>
-
-      {/* ── Header ── */}
-      <div className="flex items-center gap-2 md:gap-3 px-3 md:px-6 py-2 md:py-3 border-b border-border bg-card/30 backdrop-blur-sm flex-wrap">
-        <div className="flex items-center gap-1 md:gap-2">
-          <Button variant="outline" size="icon" onClick={() => navigateDate(-1)} className="h-8 w-8 bg-transparent">
-            <ChevronLeft className="w-3 h-3" />
-          </Button>
-
-          {/* Chip de data + ícone calendário com Popover */}
-          <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
-            <PopoverTrigger asChild>
-              <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg bg-gradient-to-r from-primary/15 to-primary/5 border border-primary/40 cursor-pointer hover:border-primary/70 hover:from-primary/20 hover:to-primary/10 transition-all shadow-sm">
-                <span className="text-xs md:text-sm font-bold text-primary capitalize truncate max-w-[140px] md:max-w-none">
-                  {formattedDate}
-                </span>
-                <Calendar className="w-4 h-4 text-primary flex-shrink-0" />
-              </div>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700 shadow-2xl rounded-xl" align="start">
-              <div className="p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Selecione a Data</p>
-                    <p className="text-lg font-bold text-white mt-1">{format(parseISO(selectedDate), "MMMM yyyy", { locale: ptBR })}</p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-3 text-xs font-bold uppercase tracking-wider bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 rounded-md"
-                    onClick={() => {
-                      setSelectedDate(format(new Date(), "yyyy-MM-dd"));
-                      setShowDatePicker(false);
-                    }}
-                  >
-                    Hoje
-                  </Button>
-                </div>
-                <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
-                  <CalendarUI
-                    mode="single"
-                    selected={parseISO(selectedDate)}
-                    onSelect={(date) => {
-                      if (date) {
-                        const newDate = format(date, "yyyy-MM-dd");
-                        setSelectedDate(newDate);
-                        setShowDatePicker(false);
-                      }
-                    }}
-                    locale={ptBR}
-                    initialFocus
-                    disabled={(date) => false}
-                    className="[&_.rdp]:text-white [&_.rdp-caption]:text-white [&_.rdp-head_cell]:text-slate-300 [&_.rdp-cell]:text-white [&_.rdp-day]:text-white [&_.rdp-day_selected]:bg-primary [&_.rdp-day_selected]:text-white [&_.rdp-day_today]:border-primary [&_.rdp-button:hover]:bg-slate-700 [&_.rdp-button]:text-white"
-                  />
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          <Button variant="outline" size="icon" onClick={() => navigateDate(1)} className="h-8 w-8 bg-transparent">
-            <ChevronRight className="w-3 h-3" />
-          </Button>
-          <Button
-            variant="outline" size="sm"
-            onClick={() => setSelectedDate(format(new Date(), "yyyy-MM-dd"))}
-            className="text-xs h-8 hidden md:inline-flex bg-transparent"
-          >
-            Hoje
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-1.5 ml-auto">
-          <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={refreshing} className="h-8 w-8" title="Atualizar">
-            <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
-          </Button>
-          <Badge variant="secondary" className="text-xs hidden md:inline-flex">
-            {completedCount}/{appointments.length}
-          </Badge>
-          <Button
-            size="sm"
-            onClick={() => { setEditingAppt(null); setDefaultEmpId(undefined); setGroupClientName(undefined); setGroupId(undefined); setModalOpen(true); }}
-            className="gap-1 h-8 text-xs md:text-sm"
-          >
-            <Plus className="w-3 h-3" />
-            <span className="hidden md:inline">Novo Agendamento</span>
-            <span className="md:hidden">+</span>
-          </Button>
-        </div>
-      </div>
-
-      {/* ── Grid ── */}
-      <div className="flex-1 overflow-auto" ref={gridRef}>
-        <div className="flex min-w-max">
-
-          {/* Time column — sticky left */}
-          <div className="w-10 md:w-14 flex-shrink-0 sticky left-0 bg-background z-20 border-r border-border">
-            <div className="h-10 md:h-12 border-b border-border sticky top-0 bg-background z-20" />
-            <div style={{ height: `${TOTAL_HOURS * HOUR_HEIGHT}px`, position: "relative" }}>
-              {Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => (
-                <div key={i} className="absolute w-full flex justify-end pr-1 md:pr-2"
-                  style={{ top: `${i * HOUR_HEIGHT - 8}px` }}>
-                  <span className="text-xs text-muted-foreground">
-                    {String(START_HOUR + i).padStart(2, "0")}:00
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Employee columns */}
-          {employees.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center p-12 text-muted-foreground">
-              <div className="text-center">
-                <p className="text-lg font-medium mb-1">Nenhum funcionário cadastrado</p>
-                <p className="text-sm">Cadastre funcionários para visualizar a agenda</p>
-              </div>
-            </div>
-          ) : (
-            employees.map(emp => (
-              <div key={emp.id} className="flex-shrink-0" style={{ width: `${MIN_COL_WIDTH}px` }}>
-                {/* Employee header — sticky top */}
-                <div className="h-10 md:h-12 border-b border-border flex items-center justify-center gap-1.5 px-2 sticky top-0 bg-card/80 backdrop-blur-sm z-20">
-                  {/* Avatar: foto se disponível, senão inicial */}
-                  <div
-                    style={{
-                      width: 26, height: 26,
-                      borderRadius: "50%",
-                      backgroundColor: emp.color,
-                      boxShadow: `0 0 0 2px ${emp.color}44`,
-                      flexShrink: 0,
-                      overflow: "hidden",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#fff",
-                    }}
-                  >
-                    {emp.photoUrl
-                      ? <img src={emp.photoUrl} alt={emp.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      : emp.name.charAt(0).toUpperCase()
-                    }
-                  </div>
-                  <span className="text-xs md:text-sm font-bold text-white uppercase tracking-wide truncate">{emp.name.split(" ")[0]}</span>
-                </div>
-
-                {/* Droppable zone wrapper — identified by data-emp-id */}
-                <div data-emp-id={emp.id}>
-                  <EmployeeColumn
-                    employee={emp}
-                    appointments={apptsByEmployee[emp.id] ?? []}
-                    serviceMap={serviceMap}
-                    groupIds={groupIds}
-                    isDragOver={dragOverEmpId === emp.id}
-                    onColumnClick={openNew}
-                    onAppointmentClick={openEdit}
-                    onDragStart={handleDragStart}
-                    startHour={START_HOUR}
-                    totalHours={TOTAL_HOURS}
-                    snapMinutes={SNAP_MINUTES}
-                  />
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* ── Drag ghost follows pointer ── */}
-      {dragging && <DragGhost appt={dragging} x={dragPos.x} y={dragPos.y} />}
-
-      {/* ── Modal ── */}
-      <AppointmentModal
-        open={modalOpen}
-        onClose={() => { setModalOpen(false); setEditingAppt(null); }}
-        appointment={editingAppt}
-        defaultEmployeeId={defaultEmpId}
-        defaultHour={defaultHour}
-        defaultMinute={defaultMinute}
-        selectedDate={selectedDate}
-        groupClientName={groupClientName}
-        groupId={groupId}
-        onSuccess={() => {
-          setRefreshKey(k => k + 1);
-          setModalOpen(false);
-          setEditingAppt(null);
-        }}
-        onAddGroupService={openGroupAdd}
-      />
-    </div>
-  );
+export async function testAgentV2Connection(
+  token: string,
+): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetch(LLM_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [{ role: "user", content: "OK" }],
+        max_tokens: 5,
+      }),
+    });
+    if (!res.ok)
+      return {
+        ok: false,
+        message: res.status === 401 ? "Token inválido." : `Erro ${res.status}`,
+      };
+    return { ok: true, message: "Conexão OK! Agente IA ativado." };
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error ? err.message : "Erro de rede.",
+    };
+  }
 }
