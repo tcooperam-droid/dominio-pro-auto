@@ -324,13 +324,28 @@ function getApptsByDate(dateStr: string): string {
   const appts = appointmentsStore.list({ date });
   const emps = employeesStore.list(true);
   if (appts.length === 0) return `Nenhum agendamento em ${date}.`;
-  return `Agendamentos ${date}:\n${appts.map((a) => {
-    const emp = emps.find((e) => e.id === a.employeeId);
-    const hora = a.startTime?.split("T")[1]?.slice(0, 5) ?? "";
-    const horaFim = a.endTime?.split("T")[1]?.slice(0, 5) ?? "";
-    const svcs = a.services?.map((s) => s.name).join(", ") ?? "";
-    return `  - ${hora}-${horaFim} | ${a.clientName} | ${svcs} | ${emp?.name ?? "?"} | ${a.status} | ID:${a.id}`;
-  }).join("\n")}`;
+
+  // Agrupar por profissional para deixar claro quem está ocupado
+  const byEmp = new Map<number, typeof appts>();
+  for (const a of appts) {
+    if (!byEmp.has(a.employeeId)) byEmp.set(a.employeeId, []);
+    byEmp.get(a.employeeId)!.push(a);
+  }
+
+  const lines: string[] = [`Agendamentos de ${date} por profissional (ATENÇÃO: conflito só bloqueia o profissional específico):`];
+  for (const [empId, empAppts] of byEmp.entries()) {
+    const emp = emps.find(e => e.id === empId);
+    lines.push(`  [${emp?.name ?? "?"}]:`);
+    for (const a of empAppts) {
+      const hora = a.startTime?.split("T")[1]?.slice(0, 5) ?? "";
+      const horaFim = a.endTime?.split("T")[1]?.slice(0, 5) ?? "";
+      const svcs = a.services?.map(s => s.name).join(", ") ?? "";
+      if (a.status !== "cancelled") {
+        lines.push(`    - ${hora}-${horaFim} OCUPADO: ${a.clientName} | ${svcs} | ID:${a.id}`);
+      }
+    }
+  }
+  return lines.join("\n");
 }
 
 // ─── Busca de clientes com histórico ─────────────────────
