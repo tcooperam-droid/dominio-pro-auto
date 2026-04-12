@@ -1,46 +1,45 @@
 /**
- * DashboardCaixaPage v4 — Visão em Tempo Real de Todos os Agendamentos
- * Reflete 100% da agenda, independentemente do status.
- * Excluindo apenas: cancelados e não compareceu.
+ * DashboardCaixaPage v5 — Realizado + Projeção Futura
+ * Realizado: agendamentos com startTime <= agora (exceto cancelados/no_show)
+ * Projeção:  agendamentos futuros (exceto cancelados/no_show)
  */
 import { useState, useMemo } from "react";
 import {
   format, subDays, startOfWeek, endOfWeek, startOfMonth, endOfMonth,
   startOfYear, endOfYear, parseISO, isWithinInterval, addDays,
+  startOfDay, endOfDay,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import {
-  TrendingUp, TrendingDown, DollarSign, Percent, Users,
-  CreditCard, Calendar, BarChart2, Award, ArrowUpRight,
-  Clock, CheckCircle, Eye,
+  TrendingUp, TrendingDown, BarChart2, Award, Calendar, Clock,
+  CheckCircle, X, ChevronRight,
 } from "lucide-react";
-import {
-  employeesStore, appointmentsStore,
-} from "@/lib/store";
+import { employeesStore, appointmentsStore } from "@/lib/store";
 
 const toNum = (v: unknown) => parseFloat(String(v ?? 0)) || 0;
 
-type Period = "hoje" | "semana" | "mes" | "trimestre" | "ano" | "custom";
+type Period = "hoje" | "semana" | "mes" | "trimestre" | "ano";
+type FuturePeriod = "semana" | "mes" | "trimestre";
 
-function getPeriodRange(period: Period, customStart?: string, customEnd?: string) {
+function getPeriodRange(period: Period) {
   const now = new Date();
   switch (period) {
-    case "hoje":
-      return { start: new Date(now.getFullYear(), now.getMonth(), now.getDate()), end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59), label: "Hoje" };
-    case "semana":
-      return { start: startOfWeek(now, { locale: ptBR }), end: endOfWeek(now, { locale: ptBR }), label: "Esta semana" };
-    case "mes":
-      return { start: startOfMonth(now), end: endOfMonth(now), label: "Este mês" };
-    case "trimestre":
-      return { start: subDays(now, 90), end: now, label: "Últimos 90 dias" };
-    case "ano":
-      return { start: startOfYear(now), end: endOfYear(now), label: "Este ano" };
-    case "custom":
-      return { start: customStart ? parseISO(customStart) : subDays(now, 30), end: customEnd ? parseISO(customEnd) : addDays(now, 30), label: "Período personalizado" };
+    case "hoje":      return { start: startOfDay(now), end: now, label: "Hoje" };
+    case "semana":    return { start: startOfWeek(now, { locale: ptBR }), end: now, label: "Esta semana" };
+    case "mes":       return { start: startOfMonth(now), end: now, label: "Este mês" };
+    case "trimestre": return { start: subDays(now, 90), end: now, label: "Últimos 90 dias" };
+    case "ano":       return { start: startOfYear(now), end: now, label: "Este ano" };
+  }
+}
+
+function getFutureRange(period: FuturePeriod) {
+  const now = new Date();
+  switch (period) {
+    case "semana":    return { start: now, end: endOfWeek(now, { locale: ptBR }), label: "Esta semana" };
+    case "mes":       return { start: now, end: endOfMonth(now), label: "Este mês" };
+    case "trimestre": return { start: now, end: addDays(now, 90), label: "Próximos 90 dias" };
   }
 }
 
@@ -57,333 +56,436 @@ function Sparkline({ data, color = "#ec4899" }: { data: number[]; color?: string
   );
 }
 
-export default function DashboardCaixaPage() {
-  const [period, setPeriod]           = useState<Period>("mes");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd]     = useState("");
-
-  const employees  = useMemo(() => employeesStore.list(false), []);
-  const allAppts   = useMemo(() => appointmentsStore.list({}), []);
-
-  const { start, end, label } = getPeriodRange(period, customStart, customEnd);
+function EmpModal({ emp, appts, onClose }: {
+  emp: { id: number; name: string; color: string; commissionPercent: number };
+  appts: any[];
+  onClose: () => void;
+}) {
   const now = new Date();
+  const realized = appts.filter(a => parseISO(a.startTime) <= now);
+  const future   = appts.filter(a => parseISO(a.startTime) > now);
+  const realRev  = realized.reduce((s, a) => s + toNum(a.totalPrice), 0);
+  const futRev   = future.reduce((s, a) => s + toNum(a.totalPrice), 0);
+  const commission = realRev * (emp.commissionPercent / 100);
 
-  // Filtrar agendamentos ativos no período (excluindo cancelados e não compareceu)
-  const activeAppts = useMemo(() =>
-    allAppts.filter(a => {
-      // Exclui apenas cancelados e não compareceu
-      if (["cancelled", "no_show"].includes(a.status)) return false;
-      // Ignora valores irrelevantes
-      if (toNum(a.totalPrice) <= 0.01) return false;
-      // Verifica se está no período
-      return isWithinInterval(parseISO(a.startTime), { start, end });
-    }),
-    [allAppts, start, end]
+  const last7: { label: string; revenue: number }[] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = subDays(now, i);
+    const key = format(d, "yyyy-MM-dd");
+    const rev = realized
+      .filter(a => format(parseISO(a.startTime), "yyyy-MM-dd") === key)
+      .reduce((s, a) => s + toNum(a.totalPrice), 0);
+    last7.push({ label: format(d, "dd/MM"), revenue: rev });
+  }
+  const maxRev = Math.max(...last7.map(d => d.revenue), 1);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose}>
+      <div className="w-full max-w-sm rounded-2xl p-5 space-y-4"
+        style={{ background: "hsl(240 6% 10%)", border: "1px solid rgba(255,255,255,0.1)" }}
+        onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: emp.color }} />
+            <h3 className="font-bold text-white">{emp.name.split(" ")[0]}</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/10">
+            <X className="w-4 h-4 text-white/60" />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+            <p className="text-[10px] text-muted-foreground">Realizado</p>
+            <p className="text-base font-bold" style={{ color: emp.color }}>R$ {realRev.toFixed(2)}</p>
+            <p className="text-[10px] text-muted-foreground">{realized.length} atend.</p>
+          </div>
+          <div className="rounded-xl p-3" style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)" }}>
+            <p className="text-[10px] text-muted-foreground">Projeção</p>
+            <p className="text-base font-bold text-amber-400">R$ {futRev.toFixed(2)}</p>
+            <p className="text-[10px] text-muted-foreground">{future.length} agend.</p>
+          </div>
+          <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+            <p className="text-[10px] text-muted-foreground">Comissão</p>
+            <p className="text-base font-bold text-purple-400">R$ {commission.toFixed(2)}</p>
+            <p className="text-[10px] text-muted-foreground">{emp.commissionPercent}%</p>
+          </div>
+          <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+            <p className="text-[10px] text-muted-foreground">Total previsto</p>
+            <p className="text-base font-bold text-emerald-400">R$ {(realRev + futRev).toFixed(2)}</p>
+            <p className="text-[10px] text-muted-foreground">{realized.length + future.length} total</p>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground mb-2">Últimos 7 dias</p>
+          <div className="space-y-1.5">
+            {last7.map((d, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-[10px] text-muted-foreground w-9">{d.label}</span>
+                <div className="flex-1 h-4 rounded bg-secondary/30 overflow-hidden">
+                  <div className="h-full rounded transition-all" style={{
+                    width: `${(d.revenue / maxRev) * 100}%`,
+                    backgroundColor: emp.color,
+                  }} />
+                </div>
+                <span className="text-[10px] font-bold w-16 text-right">R$ {d.revenue.toFixed(0)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function DashboardCaixaPage() {
+  const [period, setPeriod]             = useState<Period>("mes");
+  const [futurePeriod, setFuturePeriod] = useState<FuturePeriod>("semana");
+  const [selectedEmpId, setSelectedEmpId] = useState<number | null>(null);
+
+  const employees = useMemo(() => employeesStore.list(false), []);
+  const allAppts  = useMemo(() => appointmentsStore.list({}), []);
+  const now       = new Date();
+
+  const { start, label }           = getPeriodRange(period);
+  const { start: fStart, end: fEnd, label: fLabel } = getFutureRange(futurePeriod);
+
+  const isActive = (a: any) =>
+    !["cancelled", "no_show"].includes(a.status) && toNum(a.totalPrice) > 0.01;
+
+  const realizedAppts = useMemo(() =>
+    allAppts.filter(a => isActive(a) && parseISO(a.startTime) >= start && parseISO(a.startTime) <= now),
+    [allAppts, start]
   );
 
-  // Cálculos baseados em TODOS os agendamentos ativos
-  const totalRevenue     = activeAppts.reduce((s, a) => s + toNum(a.totalPrice), 0);
-  const totalCommissions = activeAppts.reduce((s, a) => {
+  const futureAppts = useMemo(() =>
+    allAppts.filter(a => isActive(a) && parseISO(a.startTime) > now
+      && parseISO(a.startTime) <= fEnd),
+    [allAppts, fEnd]
+  );
+
+  const realRevenue     = realizedAppts.reduce((s, a) => s + toNum(a.totalPrice), 0);
+  const realCommissions = realizedAppts.reduce((s, a) => {
     const emp = employees.find(e => e.id === a.employeeId);
     return s + (emp ? toNum(a.totalPrice) * (emp.commissionPercent / 100) : 0);
   }, 0);
-  const netRevenue       = totalRevenue - totalCommissions;
-  const avgTicket        = activeAppts.length > 0 ? totalRevenue / activeAppts.length : 0;
+  const realNet    = realRevenue - realCommissions;
+  const realTicket = realizedAppts.length > 0 ? realRevenue / realizedAppts.length : 0;
 
-  // Comparação com período anterior
-  const prevDiff  = end.getTime() - start.getTime();
+  const futRevenue     = futureAppts.reduce((s, a) => s + toNum(a.totalPrice), 0);
+  const futCommissions = futureAppts.reduce((s, a) => {
+    const emp = employees.find(e => e.id === a.employeeId);
+    return s + (emp ? toNum(a.totalPrice) * (emp.commissionPercent / 100) : 0);
+  }, 0);
+  const futNet = futRevenue - futCommissions;
+
+  const prevDiff  = now.getTime() - start.getTime();
   const prevStart = new Date(start.getTime() - prevDiff);
-  const prevEnd   = new Date(start.getTime() - 1);
-  const prevAppts = allAppts.filter(a => {
-    if (["cancelled", "no_show"].includes(a.status)) return false;
-    if (toNum(a.totalPrice) <= 0.01) return false;
-    return isWithinInterval(parseISO(a.startTime), { start: prevStart, end: prevEnd });
-  });
-  const prevRevenue  = prevAppts.reduce((s, a) => s + toNum(a.totalPrice), 0);
-  const revenueDelta = prevRevenue > 0 ? ((totalRevenue - prevRevenue) / prevRevenue) * 100 : null;
+  const prevRev   = allAppts
+    .filter(a => isActive(a) && parseISO(a.startTime) >= prevStart && parseISO(a.startTime) < start)
+    .reduce((s, a) => s + toNum(a.totalPrice), 0);
+  const revDelta = prevRev > 0 ? ((realRevenue - prevRev) / prevRev) * 100 : null;
 
-  // Dados diários
-  const dailyData = useMemo(() => {
-    const daily: Record<string, number> = {};
-    activeAppts.forEach(a => {
-      const d = format(parseISO(a.startTime), "yyyy-MM-dd");
-      daily[d] = (daily[d] ?? 0) + toNum(a.totalPrice);
-    });
-    const diff = Math.min(Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1, 60);
-    return Array.from({ length: diff }, (_, i) => {
-      const d = format(new Date(start.getTime() + i * 86400000), "yyyy-MM-dd");
-      return { date: d, revenue: daily[d] ?? 0 };
-    });
-  }, [activeAppts, start, end]);
+  const sparkData = useMemo(() =>
+    Array.from({ length: 7 }, (_, i) => {
+      const d = format(subDays(now, 6 - i), "yyyy-MM-dd");
+      return realizedAppts
+        .filter(a => format(parseISO(a.startTime), "yyyy-MM-dd") === d)
+        .reduce((s, a) => s + toNum(a.totalPrice), 0);
+    }), [realizedAppts]
+  );
 
-  // Por funcionário
-  const byEmployee = useMemo(() => {
-    return employees.map(emp => {
-      const empAppts = activeAppts.filter(a => a.employeeId === emp.id);
-      const revenue   = empAppts.reduce((s, a) => s + toNum(a.totalPrice), 0);
-      const commission = revenue * (emp.commissionPercent / 100);
-      return { employee: emp, revenue, commission, count: empAppts.length };
-    })
-    .filter(e => e.revenue > 0)
-    .sort((a, b) => b.revenue - a.revenue);
-  }, [employees, activeAppts]);
+  const last7Days = useMemo(() =>
+    Array.from({ length: 7 }, (_, i) => {
+      const d = subDays(now, 6 - i);
+      const key = format(d, "yyyy-MM-dd");
+      const dayAppts = realizedAppts.filter(a => format(parseISO(a.startTime), "yyyy-MM-dd") === key);
+      return { label: format(d, "dd/MM"), revenue: dayAppts.reduce((s, a) => s + toNum(a.totalPrice), 0), count: dayAppts.length };
+    }), [realizedAppts]
+  );
+  const maxDay = Math.max(...last7Days.map(d => d.revenue), 1);
 
-  // Por dia da semana
-  const byWeekday = useMemo(() => {
-    const days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-    const revenue: Record<number, number> = {};
-    activeAppts.forEach(a => {
-      const wd = parseISO(a.startTime).getDay();
-      revenue[wd] = (revenue[wd] ?? 0) + toNum(a.totalPrice);
-    });
-    return days.map((name, i) => ({
-      name,
-      revenue: revenue[i] ?? 0,
-    }));
-  }, [activeAppts]);
+  const futureDays = useMemo(() => {
+    const days = Math.ceil((fEnd.getTime() - now.getTime()) / 86400000);
+    return Array.from({ length: Math.min(days, 90) }, (_, i) => {
+      const d = addDays(now, i + 1);
+      const key = format(d, "yyyy-MM-dd");
+      const dayAppts = futureAppts.filter(a => format(parseISO(a.startTime), "yyyy-MM-dd") === key);
+      return { label: format(d, "EEE dd/MM", { locale: ptBR }), revenue: dayAppts.reduce((s, a) => s + toNum(a.totalPrice), 0), count: dayAppts.length };
+    }).filter(d => d.revenue > 0);
+  }, [futureAppts, fEnd]);
+  const maxFutDay = Math.max(...futureDays.map(d => d.revenue), 1);
 
-  const maxWeekday = Math.max(...byWeekday.map(d => d.revenue), 1);
+  const byEmpRealized = useMemo(() =>
+    employees.map(emp => {
+      const appts = realizedAppts.filter(a => a.employeeId === emp.id);
+      const revenue = appts.reduce((s, a) => s + toNum(a.totalPrice), 0);
+      return { emp, revenue, commission: revenue * (emp.commissionPercent / 100), count: appts.length };
+    }).filter(e => e.revenue > 0).sort((a, b) => b.revenue - a.revenue),
+    [employees, realizedAppts]
+  );
 
-  // Top dias
-  const topDays = useMemo(() => {
-    const map: Record<string, number> = {};
-    activeAppts.forEach(a => {
-      const d = format(parseISO(a.startTime), "yyyy-MM-dd");
-      map[d] = (map[d] ?? 0) + toNum(a.totalPrice);
-    });
-    return Object.entries(map)
-      .map(([day, revenue]) => ({ day, revenue }))
-      .sort((a, b) => b.revenue - a.revenue).slice(0, 5);
-  }, [activeAppts]);
+  const byEmpFuture = useMemo(() =>
+    employees.map(emp => {
+      const appts = futureAppts.filter(a => a.employeeId === emp.id);
+      const revenue = appts.reduce((s, a) => s + toNum(a.totalPrice), 0);
+      return { emp, revenue, commission: revenue * (emp.commissionPercent / 100), count: appts.length };
+    }).filter(e => e.revenue > 0).sort((a, b) => b.revenue - a.revenue),
+    [employees, futureAppts]
+  );
 
-  // Contadores por status
-  const statusCounts = useMemo(() => {
-    return {
-      scheduled: activeAppts.filter(a => a.status === "scheduled").length,
-      confirmed: activeAppts.filter(a => a.status === "confirmed").length,
-      in_progress: activeAppts.filter(a => a.status === "in_progress").length,
-      completed: activeAppts.filter(a => a.status === "completed").length,
-    };
-  }, [activeAppts]);
+  const selectedEmp = selectedEmpId !== null ? employees.find(e => e.id === selectedEmpId) : null;
+  const selectedAppts = selectedEmpId !== null ? allAppts.filter(a => isActive(a) && a.employeeId === selectedEmpId) : [];
 
-  const PERIODS = [
-    { key: "hoje" as Period,      label: "Hoje"    },
-    { key: "semana" as Period,    label: "Semana"  },
-    { key: "mes" as Period,       label: "Mês"     },
-    { key: "trimestre" as Period, label: "90 dias" },
-    { key: "ano" as Period,       label: "Ano"     },
-    { key: "custom" as Period,    label: "Período" },
+  const PERIODS: { key: Period; label: string }[] = [
+    { key: "hoje", label: "Hoje" }, { key: "semana", label: "Semana" },
+    { key: "mes", label: "Mês" }, { key: "trimestre", label: "90 dias" },
+    { key: "ano", label: "Ano" },
+  ];
+  const FUTURE_PERIODS: { key: FuturePeriod; label: string }[] = [
+    { key: "semana", label: "Semana" }, { key: "mes", label: "Mês" }, { key: "trimestre", label: "90 dias" },
   ];
 
   return (
     <div className="p-4 md:p-6 space-y-6 max-w-6xl mx-auto">
-
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-xl font-bold flex items-center gap-2">
-            <BarChart2 className="w-5 h-5 text-primary" />Dashboard Financeiro
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">{label}</p>
-        </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          {PERIODS.map(p => (
-            <Button key={p.key} size="sm" variant={period === p.key ? "default" : "ghost"}
-              className="h-7 text-xs px-3" onClick={() => setPeriod(p.key)}>{p.label}</Button>
-          ))}
-        </div>
+      <div>
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <BarChart2 className="w-5 h-5 text-primary" />Dashboard Financeiro
+        </h2>
+        <p className="text-xs text-muted-foreground mt-0.5">Realizado até agora + Projeção futura</p>
       </div>
 
-      {period === "custom" && (
-        <div className="flex items-center gap-3 p-3 rounded-lg border border-border bg-card/50">
-          <Calendar className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-          <div className="flex items-center gap-2 flex-wrap">
-            <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm" />
-            <span className="text-muted-foreground text-sm">até</span>
-            <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm" />
+      {/* REALIZADO */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-400" />
+            <span className="font-semibold text-emerald-400">Realizado</span>
+            <span className="text-xs text-muted-foreground">— {label}</span>
+          </div>
+          <div className="flex gap-1 flex-wrap">
+            {PERIODS.map(p => (
+              <Button key={p.key} size="sm" variant={period === p.key ? "default" : "ghost"}
+                className="h-6 text-xs px-2" onClick={() => setPeriod(p.key)}>{p.label}</Button>
+            ))}
           </div>
         </div>
-      )}
 
-      {/* Legenda */}
-      <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap p-3 rounded-lg bg-card/30 border border-border">
-        <span className="flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5 text-primary" /><span className="font-medium text-foreground">Faturamento</span> — todos os agendamentos ativos</span>
-        <span className="flex items-center gap-1.5"><Eye className="w-3.5 h-3.5 text-blue-400" /><span className="font-medium text-foreground">Tempo Real</span> — atualiza com a agenda</span>
-      </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Faturamento</p>
+              <p className="text-xl font-bold text-primary">R$ {realRevenue.toFixed(2)}</p>
+              <div className="flex items-center justify-between mt-1">
+                {revDelta !== null ? (
+                  <span className={`text-[10px] flex items-center gap-0.5 ${revDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {revDelta >= 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
+                    {Math.abs(revDelta).toFixed(1)}% vs ant.
+                  </span>
+                ) : <span />}
+                <Sparkline data={sparkData} color="#ec4899" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-emerald-500/20 bg-emerald-500/5">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Líquido</p>
+              <p className="text-xl font-bold text-emerald-400">R$ {realNet.toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {realRevenue > 0 ? `${((realNet / realRevenue) * 100).toFixed(1)}% do bruto` : "—"}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-border bg-card/50">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Comissões</p>
+              <p className="text-xl font-bold text-purple-400">R$ {realCommissions.toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{realizedAppts.length} atend.</p>
+            </CardContent>
+          </Card>
+          <Card className="border-border bg-card/50">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Ticket médio</p>
+              <p className="text-xl font-bold">R$ {realTicket.toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{realizedAppts.length} atend.</p>
+            </CardContent>
+          </Card>
+        </div>
 
-      {/* KPIs Principais */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Faturamento</p>
-            <p className="text-xl font-bold text-primary">R$ {totalRevenue.toFixed(2)}</p>
-            <div className="flex items-center justify-between mt-1">
-              {revenueDelta !== null ? (
-                <span className={`text-[10px] flex items-center gap-0.5 ${revenueDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                  {revenueDelta >= 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-                  {Math.abs(revenueDelta).toFixed(1)}% vs ant.
-                </span>
-              ) : <span />}
-              <Sparkline data={dailyData.map(d => d.revenue)} color="#ec4899" />
+        <Card className="border-border bg-card/50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Últimos 7 dias</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {last7Days.map((d, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-10">{d.label}</span>
+                  <div className="flex-1 h-5 bg-secondary/30 rounded overflow-hidden">
+                    <div className="h-full bg-primary rounded transition-all" style={{ width: `${(d.revenue / maxDay) * 100}%` }} />
+                  </div>
+                  <span className="text-xs font-bold w-20 text-right">R$ {d.revenue.toFixed(2)}</span>
+                  <span className="text-[10px] text-muted-foreground w-6">{d.count}x</span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-        <Card className="border-border bg-card/50">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Comissões</p>
-            <p className="text-xl font-bold">R$ {totalCommissions.toFixed(2)}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">{activeAppts.length} agendamento(s)</p>
-          </CardContent>
-        </Card>
-        <Card className="border-emerald-500/20 bg-emerald-500/5">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Líquido</p>
-            <p className="text-xl font-bold text-emerald-400">R$ {netRevenue.toFixed(2)}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">
-              {totalRevenue > 0 ? `${((netRevenue / totalRevenue) * 100).toFixed(1)}% do bruto` : "—"}
-            </p>
-          </CardContent>
-        </Card>
-        <Card className="border-border bg-card/50">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Ticket médio</p>
-            <p className="text-xl font-bold">R$ {avgTicket.toFixed(2)}</p>
-            <p className="text-[10px] text-muted-foreground mt-1">{activeAppts.length} agendamento(s)</p>
-          </CardContent>
-        </Card>
-      </div>
 
-      {/* Status dos Agendamentos */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Card className="border-border bg-card/50">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Agendados</p>
-            <p className="text-xl font-bold text-blue-400">{statusCounts.scheduled}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border bg-card/50">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Confirmados</p>
-            <p className="text-xl font-bold text-amber-400">{statusCounts.confirmed}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border bg-card/50">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Em andamento</p>
-            <p className="text-xl font-bold text-orange-400">{statusCounts.in_progress}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border bg-card/50">
-          <CardContent className="pt-4">
-            <p className="text-xs text-muted-foreground mb-1">Concluídos</p>
-            <p className="text-xl font-bold text-emerald-400">{statusCounts.completed}</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Gráfico de Faturamento por Dia */}
-      <Card className="border-border bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Faturamento — Últimos dias</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {dailyData.slice(-7).reverse().map((d, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <span className="text-xs font-medium w-12 text-muted-foreground">
-                  {format(parseISO(d.date), "dd/MM", { locale: ptBR })}
-                </span>
-                <div className="flex-1 h-5 bg-secondary/30 rounded-md overflow-hidden">
-                  <div className="h-full bg-primary transition-all duration-500" 
-                    style={{ width: `${Math.max(...dailyData.map(x => x.revenue)) > 0 ? (d.revenue / Math.max(...dailyData.map(x => x.revenue))) * 100 : 0}%` }} />
-                </div>
-                <span className="text-xs font-bold w-20 text-right">R$ {d.revenue.toFixed(2)}</span>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Award className="w-4 h-4 text-primary" />Ranking — Realizado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {byEmpRealized.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhum dado no período</p>
+            ) : (
+              <div className="space-y-3">
+                {byEmpRealized.map((e, i) => (
+                  <div key={e.emp.id} className="flex items-center gap-2 cursor-pointer hover:bg-white/5 rounded-lg p-1 transition-colors"
+                    onClick={() => setSelectedEmpId(e.emp.id)}>
+                    <span className="text-xs font-bold text-muted-foreground w-5">{i + 1}°</span>
+                    <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: e.emp.color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">{e.emp.name.split(" ")[0]}</span>
+                        <span className="text-sm font-bold text-primary">R$ {e.revenue.toFixed(2)}</span>
+                      </div>
+                      <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{
+                          width: `${byEmpRealized[0] ? (e.revenue / byEmpRealized[0].revenue) * 100 : 0}%`,
+                          backgroundColor: e.emp.color,
+                        }} />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{e.count} atend. · Comissão: R$ {e.commission.toFixed(2)}</p>
+                    </div>
+                    <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                  </div>
+                ))}
               </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* DIVISÓRIA */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-amber-400/30" />
+        <div className="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold text-amber-400"
+          style={{ background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.3)" }}>
+          <Clock className="w-3 h-3" />PROJEÇÃO FUTURA
+        </div>
+        <div className="flex-1 h-px bg-amber-400/30" />
+      </div>
+
+      {/* PROJEÇÃO */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-amber-400" />
+            <span className="font-semibold text-amber-400">Projeção</span>
+            <span className="text-xs text-muted-foreground">— {fLabel}</span>
+          </div>
+          <div className="flex gap-1 flex-wrap">
+            {FUTURE_PERIODS.map(p => (
+              <Button key={p.key} size="sm" variant={futurePeriod === p.key ? "default" : "ghost"}
+                className="h-6 text-xs px-2" onClick={() => setFuturePeriod(p.key)}>{p.label}</Button>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Ranking de Funcionários */}
-      <Card className="border-border bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Award className="w-4 h-4 text-primary" />Ranking de Funcionários
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {byEmployee.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum agendamento no período</p>
-          ) : (
-            <div className="space-y-3">
-              {byEmployee.map((emp, i) => (
-                <div key={emp.employee.id} className="flex items-center gap-3">
-                  <span className="w-5 text-xs font-bold text-muted-foreground">{i + 1}°</span>
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp.employee.color }} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium">{emp.employee.name.split(" ")[0]}</span>
-                      <span className="text-sm font-bold text-primary">R$ {emp.revenue.toFixed(2)}</span>
-                    </div>
-                    <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all" style={{
-                        width: `${byEmployee[0] ? (emp.revenue / byEmployee[0].revenue) * 100 : 0}%`,
-                        backgroundColor: emp.employee.color,
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <Card className="border-amber-400/20 bg-amber-400/5">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Faturamento previsto</p>
+              <p className="text-xl font-bold text-amber-400">R$ {futRevenue.toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{futureAppts.length} agendamento(s)</p>
+            </CardContent>
+          </Card>
+          <Card className="border-amber-400/10 bg-card/50">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Líquido previsto</p>
+              <p className="text-xl font-bold text-emerald-400">R$ {futNet.toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">após comissões</p>
+            </CardContent>
+          </Card>
+          <Card className="border-amber-400/10 bg-card/50">
+            <CardContent className="pt-4">
+              <p className="text-xs text-muted-foreground mb-1">Total geral</p>
+              <p className="text-xl font-bold text-white">R$ {(realRevenue + futRevenue).toFixed(2)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">realizado + previsto</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {futureDays.length > 0 && (
+          <Card className="border-amber-400/20 bg-card/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-amber-400" />Agenda futura
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {futureDays.map((d, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-20 capitalize">{d.label}</span>
+                    <div className="flex-1 h-5 rounded overflow-hidden" style={{ background: "rgba(251,191,36,0.1)" }}>
+                      <div className="h-full rounded transition-all" style={{
+                        width: `${(d.revenue / maxFutDay) * 100}%`,
+                        background: "rgba(251,191,36,0.6)",
                       }} />
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{emp.count} agend. — Comissão: R$ {emp.commission.toFixed(2)}</p>
+                    <span className="text-xs font-bold w-20 text-right text-amber-400">R$ {d.revenue.toFixed(2)}</span>
+                    <span className="text-[10px] text-muted-foreground w-6">{d.count}x</span>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Por Dia da Semana */}
-      <Card className="border-border bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Faturamento por Dia da Semana</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {byWeekday.map((day, i) => (
-              <div key={i} className="flex items-center gap-3">
-                <span className="text-xs font-medium w-8">{day.name}</span>
-                <div className="flex-1 h-5 bg-secondary/30 rounded-md overflow-hidden">
-                  <div className="h-full bg-primary transition-all duration-500" 
-                    style={{ width: `${maxWeekday > 0 ? (day.revenue / maxWeekday) * 100 : 0}%` }} />
-                </div>
-                <span className="text-xs font-bold w-20 text-right">R$ {day.revenue.toFixed(2)}</span>
+                ))}
               </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Top 5 Dias */}
-      <Card className="border-border bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Melhores Dias</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {topDays.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum agendamento no período</p>
-          ) : (
-            <div className="space-y-2">
-              {topDays.map((day, i) => (
-                <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-secondary/30">
-                  <span className="text-sm font-medium">{format(parseISO(day.day), "dd/MM/yyyy", { locale: ptBR })}</span>
-                  <span className="text-sm font-bold text-primary">R$ {day.revenue.toFixed(2)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        {byEmpFuture.length > 0 && (
+          <Card className="border-amber-400/20 bg-card/50">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Award className="w-4 h-4 text-amber-400" />Ranking — Projeção
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {byEmpFuture.map((e, i) => (
+                  <div key={e.emp.id} className="flex items-center gap-2 cursor-pointer hover:bg-white/5 rounded-lg p-1 transition-colors"
+                    onClick={() => setSelectedEmpId(e.emp.id)}>
+                    <span className="text-xs font-bold text-muted-foreground w-5">{i + 1}°</span>
+                    <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: e.emp.color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium">{e.emp.name.split(" ")[0]}</span>
+                        <span className="text-sm font-bold text-amber-400">R$ {e.revenue.toFixed(2)}</span>
+                      </div>
+                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(251,191,36,0.15)" }}>
+                        <div className="h-full rounded-full" style={{
+                          width: `${byEmpFuture[0] ? (e.revenue / byEmpFuture[0].revenue) * 100 : 0}%`,
+                          background: "rgba(251,191,36,0.7)",
+                        }} />
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{e.count} agend. previstos</p>
+                    </div>
+                    <ChevronRight className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
+      {selectedEmp && (
+        <EmpModal emp={selectedEmp} appts={selectedAppts} onClose={() => setSelectedEmpId(null)} />
+      )}
     </div>
   );
 }
