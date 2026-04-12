@@ -3,7 +3,7 @@
  * Fonte de verdade: agendamentos.
  */
 import { useState, useMemo } from "react";
-import { format, subDays, parseISO } from "date-fns";
+import { format, subDays, parseISO, startOfDay, endOfDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line,
 } from "recharts";
-import { TrendingUp, Users, DollarSign, Award, Calendar, Scissors, Percent } from "lucide-react";
+import { TrendingUp, Users, DollarSign, Award, Calendar, Scissors, Percent, X, ChevronRight } from "lucide-react";
 import { appointmentsStore, employeesStore, servicesStore } from "@/lib/store";
 import {
   calcPeriodStats, calcRevenueByDay, calcRevenueByEmployee,
@@ -38,11 +38,16 @@ export default function RelatoriosPage() {
   const [customStart, setCustomStart] = useState(() => format(subDays(new Date(), 30), "yyyy-MM-dd"));
   const [customEnd, setCustomEnd]     = useState(() => format(new Date(), "yyyy-MM-dd"));
 
+  const [selectedEmp, setSelectedEmp] = useState<any | null>(null);
   const employees = useMemo(() => employeesStore.list(false), []);
 
   const { start, end, label } = getPeriodDates(period, customStart, customEnd);
 
-  const appts    = useMemo(() => getAppointmentsInPeriod(start, end), [start, end]);
+  // Filtrar apenas agendamentos até o momento presente (sem projeções futuras)
+  const now = new Date();
+  const appts    = useMemo(() => getAppointmentsInPeriod(start, end).filter(a => {
+    try { return parseISO(a.startTime) <= now; } catch { return false; }
+  }), [start, end]);
   const stats    = useMemo(() => calcPeriodStats(appts, employees), [appts, employees]);
   const byDay    = useMemo(() => calcRevenueByDay(appts, Math.min(30, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1)), [appts, start, end]);
   const byEmp    = useMemo(() => calcRevenueByEmployee(appts, employees), [appts, employees]);
@@ -158,12 +163,13 @@ export default function RelatoriosPage() {
             ) : (
               <div className="space-y-4">
                 {byEmp.map((emp, i) => (
-                  <div key={emp.id} className="space-y-1">
+                  <div key={emp.id} className="space-y-1 cursor-pointer rounded-lg p-1 hover:bg-white/5 transition-colors" onClick={() => setSelectedEmp(emp)}>
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-bold text-muted-foreground w-5">{i + 1}°</span>
                       <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: emp.color }} />
                       <span className="text-sm font-semibold flex-1">{emp.name.split(" ")[0]}</span>
                       <span className="text-sm font-bold text-primary">R$ {emp.revenue.toFixed(2)}</span>
+                      <ChevronRight className="w-3 h-3 text-muted-foreground" />
                     </div>
                     <div className="pl-7 space-y-1">
                       <div className="h-2 rounded-full bg-secondary overflow-hidden">
@@ -277,6 +283,66 @@ export default function RelatoriosPage() {
         </Card>
 
       </div>
+      {/* Modal de detalhe do funcionário */}
+      {selectedEmp && (() => {
+        const empAppts = getAppointmentsInPeriod(start, end)
+          .filter(a => a.employeeId === selectedEmp.id && parseISO(a.startTime) <= now);
+        const days = Math.min(30, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
+        const empByDay: { label: string; revenue: number; count: number }[] = [];
+        for (let i = days - 1; i >= 0; i--) {
+          const d = subDays(new Date(), i);
+          const key = format(d, "yyyy-MM-dd");
+          const dayAppts = empAppts.filter(a => {
+            try { return format(parseISO(a.startTime), "yyyy-MM-dd") === key; } catch { return false; }
+          });
+          empByDay.push({
+            label: format(d, "dd/MM"),
+            revenue: dayAppts.reduce((s, a) => s + (a.totalPrice ?? 0), 0),
+            count: dayAppts.length,
+          });
+        }
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setSelectedEmp(null)}>
+            <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "hsl(240 6% 10%)", border: "1px solid rgba(255,255,255,0.1)" }} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-4 h-4 rounded-full" style={{ backgroundColor: selectedEmp.color }} />
+                  <h3 className="font-bold text-white">{selectedEmp.name.split(" ")[0]}</h3>
+                </div>
+                <button onClick={() => setSelectedEmp(null)} className="p-1 rounded-lg hover:bg-white/10">
+                  <X className="w-4 h-4 text-white/60" />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <p className="text-xs text-muted-foreground">Faturamento</p>
+                  <p className="text-sm font-bold" style={{ color: selectedEmp.color }}>R$ {selectedEmp.revenue.toFixed(2)}</p>
+                </div>
+                <div className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <p className="text-xs text-muted-foreground">Comissão</p>
+                  <p className="text-sm font-bold text-purple-400">R$ {selectedEmp.commission.toFixed(2)}</p>
+                </div>
+                <div className="rounded-xl p-3 text-center" style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <p className="text-xs text-muted-foreground">Atend.</p>
+                  <p className="text-sm font-bold text-blue-400">{selectedEmp.count}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Faturamento diário</p>
+                <ResponsiveContainer width="100%" height={160}>
+                  <BarChart data={empByDay} barSize={16}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="label" tick={{ fontSize: 10, fill: "hsl(0 0% 55%)" }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 10, fill: "hsl(0 0% 55%)" }} />
+                    <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => [`R$ ${Number(v).toFixed(2)}`, "Faturamento"]} />
+                    <Bar dataKey="revenue" fill={selectedEmp.color} radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
