@@ -299,7 +299,8 @@ function getEmployeesData(): string {
   return `Profissionais ativos:\n${emps.map((e) => {
     const wh = e.workingHours;
     let hoursInfo = "";
-    if (wh && Object.keys(wh).length > 0) {
+    if (wh && Object.keys(wh).length > 1) {
+      // Só mostra horários se tiver dados completos (mais de 1 chave)
       const keyToLabel: Record<string, string> = {
         "0": "Dom", "dom": "Dom", "domingo": "Dom",
         "1": "Seg", "seg": "Seg", "segunda": "Seg",
@@ -314,6 +315,8 @@ function getEmployeesData(): string {
         .map(([k, v]) => `${keyToLabel[k.toLowerCase()] ?? k}: ${v.start}-${v.end}`)
         .join(", ");
       if (activeDays) hoursInfo = ` | Horários: ${activeDays}`;
+    } else if (wh && Object.keys(wh).length === 1) {
+      hoursInfo = " | Horários: Seg-Sáb: 07:00-18:00";
     }
     return `  - ID:${e.id} | ${e.name} | Comissão: ${e.commissionPercent}%${hoursInfo}`;
   }).join("\n")}`;
@@ -456,9 +459,13 @@ function getFinancialSummary(scope: "dia" | "semana" | "mes"): string {
 
 // ─── Dados contextuais para o LLM ────────────────────────
 
-async function gatherData(msg: string): Promise<string> {
+async function gatherData(msg: string, history: AgentMessage[] = []): Promise<string> {
   const q = msg.toLowerCase();
   const parts: string[] = [getTodayData(), getEmployeesData(), getServicesData()];
+
+  // Extrair nomes candidatos do histórico recente também (últimas 6 msgs)
+  const recentHistory = history.slice(-6).map(m => m.content).join(" ");
+  const fullContext = msg + " " + recentHistory;
 
   // Extrair candidatos a nome de cliente
   const normalize = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -498,7 +505,7 @@ async function gatherData(msg: string): Promise<string> {
     "40", "45", "50", "55", "60", "65", "70", "80", "90",
   ]);
 
-  const words = msg
+  const words = fullContext
     .split(/\s+/)
     .filter((w) => w.length > 2 && /^[A-Za-zÀ-ÖØ-öø-ÿ]/.test(w));
   const candidateNames = words.filter((w) => {
@@ -531,13 +538,14 @@ async function gatherData(msg: string): Promise<string> {
   }
 
   // Se menciona data específica
-  const dateMatch = q.match(
+  const fullQ = fullContext.toLowerCase();
+  const dateMatch = fullQ.match(
     /\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|amanha|amanhã|segunda|terca|terça|quarta|quinta|sexta|sabado|sábado|domingo)\b/i
   );
   if (dateMatch) parts.push(getApptsByDate(dateMatch[1]));
 
   // Se menciona financeiro
-  if (/faturamento|financeiro|receita|comiss[aã]o|rendimento|lucro|ganho|caixa/.test(q)) {
+  if (/faturamento|financeiro|receita|comiss[aã]o|rendimento|lucro|ganho|caixa/.test(fullQ)) {
     let scope: "dia" | "semana" | "mes" = "dia";
     if (/semana/.test(q)) scope = "semana";
     else if (/mes|mês/.test(q)) scope = "mes";
@@ -906,8 +914,9 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
     : null;
   if (!emp && emps.length === 1) emp = emps[0];
   if (!emp) {
+    // Fix 3: salvar clientName EXATO do banco para re-execução correta
     savePendingAction(
-      { type: "agendar", params: { ...params } },
+      { type: "agendar", params: { ...params, clientName: client.name } },
       "professional",
     );
     const lista = emps.map((e) => `${e.name} (ID:${e.id})`).join(", ");
@@ -941,8 +950,9 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
   if (conflict && !params.forceConflict) {
     const conflictHour = conflict.startTime?.split("T")[1]?.slice(0, 5);
     const conflictEnd = conflict.endTime?.split("T")[1]?.slice(0, 5);
+    // Fix 3: salvar clientName EXATO do banco para re-execução correta
     savePendingAction(
-      { type: "agendar", params: { ...params, forceConflict: true } },
+      { type: "agendar", params: { ...params, clientName: client.name, forceConflict: true } },
       "conflict",
     );
     return `CONFLITO:${emp.name} já tem agendamento das ${conflictHour} às ${conflictEnd} (${conflict.clientName ?? "cliente"}). Para forçar mesmo assim, confirme explicitamente.`;
@@ -1036,7 +1046,7 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   const history = loadHistory().slice(0, -1);
   let systemData = "(dados indisponíveis)";
   try {
-    systemData = await gatherData(msgTrimmed);
+    systemData = await gatherData(msgTrimmed, history);
   } catch (err) {
     console.warn("[agentV2] gatherData falhou, prosseguindo sem dados:", err);
   }
@@ -1089,13 +1099,17 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
       // LLM afirmou ter feito mas não gerou o bloco action — forçar extração via segunda chamada
       console.log("[agentV2] LLM não gerou action, tentando extração forçada...");
       try {
+        // Montar contexto completo da conversa para o extrator
+        const recentMsgs = history.slice(-6).map(m => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`).join("\n");
         const forceRaw = await callLLM(
-          `Você é um extrator de JSON. Analise a conversa e extraia os dados do agendamento em formato JSON exato.
+          `Você é um extrator de JSON para agendamentos de salão de beleza.
+Analise o histórico da conversa e extraia os dados do agendamento solicitado.
 Responda APENAS com o JSON, sem texto adicional, sem explicações, sem markdown.
-Formato obrigatório: {"type":"agendar","params":{"clientName":"NOME","serviceId":0,"employeeId":0,"date":"YYYY-MM-DD","time":"HH:MM"}}
-Se não tiver todos os dados, responda: {}`,
+Formato obrigatório: {"type":"agendar","params":{"clientName":"NOME EXATO","serviceId":0,"employeeId":0,"date":"YYYY-MM-DD","time":"HH:MM"}}
+Use serviceId e employeeId dos dados do sistema fornecidos.
+Se não tiver TODOS os dados necessários, responda apenas: {}`,
           [],
-          `Contexto: ${msgTrimmed}\nResposta do assistente: ${raw}\nDados do sistema: ${systemData}`,
+          `=== HISTÓRICO RECENTE ===\n${recentMsgs}\n\n=== MENSAGEM ATUAL ===\n${msgTrimmed}\n\n=== DADOS DO SISTEMA ===\n${systemData}`,
           "",
           cfg,
         );
