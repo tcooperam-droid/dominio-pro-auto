@@ -36,6 +36,7 @@ import {
   buildMemoryPrompt,
   detectTeachingIntent,
   addRule,
+  loadRules,
   addFeedback as memoryAddFeedback,
   refreshPreferences,
 } from "./agentMemory";
@@ -216,6 +217,22 @@ function resolveDate(raw: string): string {
 
 // ─── Validação de horário de trabalho ─────────────────────
 
+function hasScheduleOverride(empName: string): boolean {
+  try {
+    const rules = loadRules();
+    const nameNorm = empName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const firstName = nameNorm.split(" ")[0];
+    return rules.some(r => {
+      const rNorm = r.raw.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return (rNorm.includes(firstName)) &&
+        (rNorm.includes("qualquer dia") || rNorm.includes("sem horario") ||
+         rNorm.includes("sem restricao") || rNorm.includes("agenda sempre") ||
+         rNorm.includes("ignora horario") || rNorm.includes("nao tem horario") ||
+         rNorm.includes("atende qualquer") || rNorm.includes("disponivel sempre"));
+    });
+  } catch { return false; }
+}
+
 function isWithinWorkingHours(
   emp: Employee,
   dateStr: string,
@@ -225,6 +242,8 @@ function isWithinWorkingHours(
   if (!wh || Object.keys(wh).length === 0) return { ok: true };
   // Se só tem 1 chave no banco (dado corrompido/incompleto), não bloquear
   if (Object.keys(wh).length === 1) return { ok: true };
+  // Override: usuário ensinou que este funcionário atende qualquer dia
+  if (hasScheduleOverride(emp.name)) return { ok: true };
 
   const dayOfWeek = getDayOfWeek(dateStr);
 
@@ -250,7 +269,7 @@ function isWithinWorkingHours(
     ];
     return {
       ok: false,
-      message: `${emp.name} não trabalha ${dayNames[dayOfWeek]}.`,
+      message: `${emp.name} não trabalha ${dayNames[dayOfWeek]}. Se quiser agendar mesmo assim, diga "agenda mesmo assim" ou ensine: "lembra que ${emp.name.split(" ")[0]} atende qualquer dia".`,
     };
   }
 
@@ -261,7 +280,7 @@ function isWithinWorkingHours(
   if (reqMin < startMin || reqMin >= endMin) {
     return {
       ok: false,
-      message: `${emp.name} trabalha das ${dayConfig.start} às ${dayConfig.end} neste dia. O horário ${timeStr} está fora do expediente.`,
+      message: `${emp.name} trabalha das ${dayConfig.start} às ${dayConfig.end} neste dia. O horário ${timeStr} está fora do expediente. Para agendar mesmo assim, diga "agenda mesmo assim" ou ensine um novo horário.`,
     };
   }
 
@@ -357,7 +376,11 @@ async function getClientWithHistory(query: string): Promise<string> {
   const q = query.trim();
   if (!q) {
     let totalStr = "(indisponível)";
-    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    try {
+      // Preferir cache local — mais confiável que count() com RLS anônimo
+      const cached = await clientsStore.ensureLoaded();
+      totalStr = String(cached.length > 0 ? cached.length : await clientsStore.count());
+    } catch { /* Supabase indisponível */ }
     return `Total clientes: ${totalStr}`;
   }
 
@@ -533,7 +556,10 @@ async function gatherData(msg: string, history: AgentMessage[] = []): Promise<st
     parts.push(clientData);
   } else {
     let totalStr = "(indisponível)";
-    try { totalStr = String(await clientsStore.count()); } catch { /* Supabase indisponível */ }
+    try {
+      const cached = await clientsStore.ensureLoaded();
+      totalStr = String(cached.length > 0 ? cached.length : await clientsStore.count());
+    } catch { /* Supabase indisponível */ }
     parts.push(`Total clientes cadastrados: ${totalStr}. Use busca por nome para localizar.`);
   }
 
@@ -588,6 +614,8 @@ REGRAS:
 13. HORÁRIOS OCUPADOS: cada agendamento tem um profissional (Prof: NOME). Um horário só está ocupado para um profissional SE houver agendamento com AQUELE profissional naquele horário. Agendamentos de outros profissionais NÃO bloqueiam o horário do profissional solicitado
 14. Ao sugerir horários disponíveis, liste APENAS os horários que NÃO têm agendamento para o profissional específico solicitado
 15. NUNCA peça confirmação mais de uma vez para o mesmo agendamento — se já confirmou, execute a ação diretamente
+16. OVERRIDE DE HORÁRIO: Se o usuário disser "agenda mesmo assim" após bloqueio de horário, execute a ação normalmente adicionando forceSchedule:true nos params. O sistema vai ignorar a restrição de horário
+17. Se o usuário ensinar "lembra que [funcionário] atende qualquer dia" ou similar, confirme e oriente que na próxima vez o agendamento será liberado automaticamente
 
 AÇÕES — inclua ao final da resposta quando executar operação:
 \`\`\`action
@@ -923,9 +951,11 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
     return `AGUARDANDO_PROFISSIONAL:${lista}`;
   }
 
-  // 4. Validar horário de trabalho
-  const whCheck = isWithinWorkingHours(emp, resolvedDate, resolvedTime);
-  if (!whCheck.ok) return whCheck.message!;
+  // 4. Validar horário de trabalho (ignora se forceSchedule=true)
+  if (!params.forceSchedule) {
+    const whCheck = isWithinWorkingHours(emp, resolvedDate, resolvedTime);
+    if (!whCheck.ok) return whCheck.message!;
+  }
 
   // 5. Calcular horários
   const durationMinutes = svc.durationMinutes > 0 ? svc.durationMinutes : 60;
@@ -1017,6 +1047,30 @@ export function initAgentV2(config: AgentV2Config): void {
   cfg = config;
 }
 
+// ─── Detectar diretrizes de comportamento ─────────────────
+function detectDirectiveIntent(msg: string): string | null {
+  const m = msg.trim();
+  const lower = m.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // Padrões de diretriz: "seja sempre X", "nunca invente", "seja X", "sempre X"
+  const patterns = [
+    /^seja\s+sempre\s+.+/i,
+    /^seja\s+.+/i,
+    /^nunca\s+(invente|minta|confirme|execute|faca|diga).+/i,
+    /^sempre\s+(confirme|pergunte|verifique|informe|seja).+/i,
+    /^(comportamento|diretriz|regra de comportamento)[:：]\s*.+/i,
+    /^a partir de agora\s+(seja|nunca|sempre).+/i,
+    /^de agora em diante\s+(seja|nunca|sempre).+/i,
+    /^quero que voce (seja|nunca|sempre|evite).+/i,
+  ];
+
+  const normalized = lower;
+  for (const p of patterns) {
+    if (p.test(normalized)) return m;
+  }
+  return null;
+}
+
 export async function handleMessageV2(userMessage: string): Promise<AgentV2Response> {
   if (!cfg) return { text: "Agente não configurado." };
 
@@ -1031,11 +1085,17 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
     if (result) return result;
   }
 
-  // ── 2. Detectar comando de ensino (regra explícita) ──
+  // ── 2. Detectar comando de ensino (regra explícita ou diretriz) ──
   const teachIntent = detectTeachingIntent(msgTrimmed);
-  if (teachIntent) {
-    const rule = addRule(teachIntent);
-    const confirmation = `Entendido! Vou lembrar disso sempre:\n"${rule.raw}"`;
+  // Detectar diretrizes de comportamento do agente
+  const directiveIntent = detectDirectiveIntent(msgTrimmed);
+  if (teachIntent || directiveIntent) {
+    const intent = teachIntent || directiveIntent!;
+    const rule = addRule(intent);
+    const isDirective = !!directiveIntent;
+    const confirmation = isDirective
+      ? `Entendido! Vou adotar essa diretriz permanentemente:\n"${rule.raw}"\n\nEla será aplicada em todas as minhas respostas daqui em diante.`
+      : `Entendido! Vou lembrar disso sempre:\n"${rule.raw}"`;
     addToHistory("user", msgTrimmed);
     addToHistory("assistant", confirmation);
     return { text: confirmation };
