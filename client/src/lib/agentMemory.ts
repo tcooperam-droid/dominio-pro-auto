@@ -193,7 +193,20 @@ export function detectTeachingIntent(msg: string): string | null {
 export function getRulesPrompt(): string {
   const rules = loadRules();
   if (rules.length === 0) return "";
-  return `Regras ensinadas pelo usuário (seguir sempre):\n${rules.map(r => `  - ${r.raw}`).join("\n")}`;
+
+  // Separar diretrizes de comportamento das regras operacionais
+  const directivePatterns = /seja|nunca invente|nunca minta|sempre confirm|sempre pergunte|comportamento|diretriz|a partir de agora|de agora em diante/i;
+  const directives = rules.filter(r => directivePatterns.test(r.raw));
+  const operational = rules.filter(r => !directivePatterns.test(r.raw));
+
+  const parts: string[] = [];
+  if (directives.length > 0) {
+    parts.push(`DIRETRIZES DE COMPORTAMENTO (máxima prioridade):\n${directives.map(r => `  ⚡ ${r.raw}`).join("\n")}`);
+  }
+  if (operational.length > 0) {
+    parts.push(`Regras operacionais ensinadas:\n${operational.map(r => `  - ${r.raw}`).join("\n")}`);
+  }
+  return parts.join("\n\n");
 }
 
 // ─── 3. Padrões por histórico ─────────────────────────────
