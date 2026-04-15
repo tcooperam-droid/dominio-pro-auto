@@ -203,7 +203,13 @@ function resolveDate(raw: string): string {
 
   if (/^\d{1,2}\/\d{1,2}/.test(r)) {
     const [dd, mm, yy] = r.split("/");
-    return `${yy ?? today.getFullYear()}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+    const year = yy ? (parseInt(yy) < 100 ? 2000 + parseInt(yy) : parseInt(yy)) : today.getFullYear();
+    const month = parseInt(mm);
+    const day = parseInt(dd);
+    const d = new Date(year, month - 1, day);
+    // Validar data (ex: 31/02 é inválido)
+    if (d.getMonth() !== month - 1 || d.getDate() !== day) return today.toISOString().split("T")[0];
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
   if (/^\d{1,2}$/.test(r)) {
@@ -663,53 +669,61 @@ async function callLLM(
   const ctrl = new AbortController();
   const tmr = setTimeout(() => ctrl.abort(), 25_000);
 
-  try {
-    const isLocalhost =
-      typeof window !== "undefined" &&
-      ["localhost", "127.0.0.1"].includes(window.location.hostname);
-    const useProxy = !isLocalhost;
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const isLocalhost =
+    typeof window !== "undefined" &&
+    ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const useProxy = !isLocalhost;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
 
-    if (useProxy) {
-      if (config.apiToken && config.apiToken !== "proxy") {
-        headers["x-github-token"] = config.apiToken;
-      }
-    } else {
-      if (!config.apiToken || config.apiToken === "proxy") {
-        throw new Error("Token não configurado para ambiente local.");
-      }
-      headers.Authorization = `Bearer ${config.apiToken}`;
+  if (useProxy) {
+    if (config.apiToken && config.apiToken !== "proxy") {
+      headers["x-github-token"] = config.apiToken;
     }
-
-    const res = await fetch(useProxy ? LLM_PROXY : LLM_ENDPOINT, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: config.model ?? "openai/gpt-4o-mini",
-        messages,
-        temperature: 0.2,
-        max_tokens: 1200,
-      }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(tmr);
-
-    if (!res.ok) {
-      if (res.status === 401)
-        throw new Error("Token inválido. Verifique seu GitHub PAT em: github.com/settings/tokens");
-      if (res.status === 429)
-        throw new Error("Limite de requisições atingido. Aguarde alguns segundos.");
-      throw new Error(`Erro ${res.status}`);
+  } else {
+    if (!config.apiToken || config.apiToken === "proxy") {
+      throw new Error("Token não configurado para ambiente local.");
     }
-
-    const json = await res.json();
-    return json?.choices?.[0]?.message?.content ?? "";
-  } catch (err) {
-    clearTimeout(tmr);
-    if (err instanceof DOMException && err.name === "AbortError")
-      throw new Error("Timeout — tente novamente.");
-    throw err;
+    headers.Authorization = `Bearer ${config.apiToken}`;
   }
+
+  // Retry automático — até 2 tentativas com backoff
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1200));
+    try {
+      const res = await fetch(useProxy ? LLM_PROXY : LLM_ENDPOINT, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: config.model ?? "openai/gpt-4o-mini",
+          messages,
+          temperature: 0.2,
+          max_tokens: 1200,
+        }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(tmr);
+
+      if (!res.ok) {
+        if (res.status === 401)
+          throw new Error("Token inválido. Verifique seu GitHub PAT em: github.com/settings/tokens");
+        if (res.status === 429)
+          throw new Error("Limite de requisições atingido. Aguarde alguns segundos.");
+        throw new Error(`Erro ${res.status}`);
+      }
+
+      const json = await res.json();
+      return json?.choices?.[0]?.message?.content ?? "";
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof DOMException && err.name === "AbortError") break; // timeout não faz retry
+      if ((err as any)?.message?.includes("401")) break; // auth error não faz retry
+    }
+  }
+  clearTimeout(tmr);
+  if (lastErr instanceof DOMException && (lastErr as DOMException).name === "AbortError")
+    throw new Error("Timeout — tente novamente.");
+  throw lastErr;
 }
 
 // ─── Execução de ações ────────────────────────────────────
@@ -773,6 +787,9 @@ async function executeSwapClient(params: Record<string, unknown>): Promise<strin
 }
 
 async function executeAction(action: ActionPayload): Promise<string> {
+  if (!action || !action.type || !action.params) {
+    return "Ação inválida: estrutura incompleta. Tente reformular o pedido.";
+  }
   const { type, params } = action;
   try {
     if (type === "agendar") return await executeSchedule(params);
