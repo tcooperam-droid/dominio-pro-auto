@@ -177,12 +177,10 @@ export default function AppointmentModal({
       setStatus("scheduled");
       setNotes("");
       
-      // Limpa serviços ao abrir novo agendamento sem grupo
-      if (!groupClientName) {
-        setSelectedServices([]);
-      }
+      // Limpa serviços ao abrir novo agendamento
+      setSelectedServices([]);
     }
-  }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData]);
+  }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData, selectedDate]);
 
   const addService = (serviceId: string) => {
     if (!serviceId) return;
@@ -230,12 +228,19 @@ export default function AppointmentModal({
   };
 
   const handleSelectClient = (client: typeof allClients[0]) => {
+    // 1. Primeiro, limpa qualquer estado de serviço anterior para garantir que não haja mistura
+    if (!isEditing) {
+      setSelectedServices([]);
+    }
+
+    // 2. Define o novo cliente
     setClientId(client.id);
     setClientName(client.name);
     setClientSearch("");
 
-    // ─── Preenchimento automático baseado no histórico do cliente ───
+    // 3. ─── Preenchimento automático baseado EXCLUSIVAMENTE no histórico DESTE cliente ───
     if (!isEditing) {
+      // Buscamos TODOS os agendamentos do cache para filtrar apenas os deste cliente específico
       const allAppts = appointmentsStore.list({});
       const clientAppts = allAppts
         .filter(a => a.clientId === client.id && a.status === "completed")
@@ -244,33 +249,37 @@ export default function AppointmentModal({
       if (clientAppts.length > 0) {
         const lastAppt = clientAppts[0];
 
-        // 1. Sugere o funcionário habitual se ainda não houver um selecionado ou se for o padrão
-        if (lastAppt.employeeId && (!employeeId || employeeId === "")) {
+        // Sugere o funcionário que atendeu este cliente da última vez
+        if (lastAppt.employeeId) {
           setEmployeeId(String(lastAppt.employeeId));
         }
 
-        // 2. Se não houver serviços selecionados, preenche com os últimos serviços automaticamente
-        if (selectedServices.length === 0) {
-          let lastVisitServices = lastAppt.services ?? [];
-          if (lastAppt.groupId) {
-            const groupAppts = clientAppts
-              .filter(a => a.groupId === lastAppt.groupId)
-              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-            lastVisitServices = groupAppts.flatMap(a => a.services ?? []);
-          }
-
-          if (lastVisitServices.length > 0) {
-            setSelectedServices(lastVisitServices.map(s => ({
-              serviceId: s.serviceId,
-              name: s.name,
-              price: s.price,
-              durationMinutes: s.durationMinutes,
-              color: s.color,
-              materialCostPercent: s.materialCostPercent ?? 0,
-            })));
-            toast.info(`Serviços habituais de ${client.name} carregados.`);
-          }
+        // Identifica os serviços da última visita deste cliente (considerando grupos/visitas múltiplas)
+        let lastVisitServices = lastAppt.services ?? [];
+        if (lastAppt.groupId) {
+          const groupAppts = clientAppts
+            .filter(a => a.groupId === lastAppt.groupId)
+            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+          lastVisitServices = groupAppts.flatMap(a => a.services ?? []);
         }
+
+        if (lastVisitServices.length > 0) {
+          // Mapeia os serviços para o formato do estado local, garantindo que venham do histórico do cliente
+          const servicesToSet = lastVisitServices.map(s => ({
+            serviceId: s.serviceId,
+            name: s.name,
+            price: s.price,
+            durationMinutes: s.durationMinutes,
+            color: s.color,
+            materialCostPercent: s.materialCostPercent ?? 0,
+          }));
+          
+          setSelectedServices(servicesToSet);
+          toast.info(`Sugestão: Carregados os últimos serviços de ${client.name}.`);
+        }
+      } else {
+        // Se o cliente não tem histórico, garantimos que a lista de serviços esteja vazia
+        setSelectedServices([]);
       }
     }
   };
@@ -808,4 +817,4 @@ export default function AppointmentModal({
       </DialogContent>
     </Dialog>
   );
-}
+            }
