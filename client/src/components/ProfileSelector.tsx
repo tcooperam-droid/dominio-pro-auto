@@ -1,8 +1,9 @@
 /**
- * ProfileSelector — Seleção de perfil com biometria via digital/face
+ * ProfileSelector — Seleção de perfil com senha e biometria
  */
 import { useState } from "react";
-import { type UserRole, setSession, loadAccessConfig, getDefaultRoute } from "@/lib/access";
+import { type UserRole, setSession, loadAccessConfig, getDefaultRoute, isAccessControlEnabled } from "@/lib/access";
+import { Eye, EyeOff, Lock, Fingerprint } from "lucide-react";
 
 function getAccent() {
   try { const s = localStorage.getItem("salon_config"); if (s) return JSON.parse(s).accentColor || "#ec4899"; } catch {}
@@ -70,31 +71,64 @@ export default function ProfileSelector({ onSelect }: ProfileSelectorProps = {})
   const accent = getAccent();
   const salonName = getSalonName();
   const cfg = loadAccessConfig();
-  const [bioState, setBioState] = useState<"idle" | "checking" | "error">("idle");
-  const [bioMsg, setBioMsg] = useState("");
+  const accessEnabled = isAccessControlEnabled();
+
+  const [selectedProfile, setSelectedProfile] = useState<{role: UserRole, label: string} | null>(null);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const profiles = [
-    { role: "owner"    as UserRole, emoji: "👑", label: "Dono",                      sublabel: "Acesso total"      },
-    { role: "manager"  as UserRole, emoji: "👔", label: cfg.managerName || "Gerente", sublabel: "Acesso total"      },
-    { role: "employee" as UserRole, emoji: "✂️", label: "Funcionário",               sublabel: "Agenda e clientes" },
-  ];
+    { role: "owner"    as UserRole, emoji: "👑", label: "Dono",                      sublabel: "Acesso total",      enabled: true },
+    { role: "manager"  as UserRole, emoji: "👔", label: cfg.managerName || "Gerente", sublabel: "Acesso total",      enabled: cfg.managerEnabled },
+    { role: "employee" as UserRole, emoji: "✂️", label: "Funcionário",               sublabel: "Agenda e clientes", enabled: cfg.employeesAccessEnabled },
+  ].filter(p => p.enabled);
 
-  async function handleSelect(role: UserRole, profileName: string) {
-    setBioState("checking");
-    setBioMsg("");
+  async function handleProfileClick(role: UserRole, label: string) {
+    if (!accessEnabled) {
+      doLogin(role, label);
+      return;
+    }
+    setSelectedProfile({ role, label });
+    setError("");
+    setPassword("");
+  }
+
+  async function handleLogin() {
+    if (!selectedProfile) return;
+    
+    setLoading(true);
+    setError("");
+
+    const role = selectedProfile.role;
+    let expectedPwd = "";
+    if (role === "owner") expectedPwd = cfg.ownerPassword;
+    else if (role === "manager") expectedPwd = cfg.managerPassword;
+    else if (role === "employee") expectedPwd = cfg.employeePassword;
+
+    if (password === expectedPwd) {
+      doLogin(role, selectedProfile.label);
+    } else {
+      setError("Senha incorreta. Tente novamente.");
+      setLoading(false);
+    }
+  }
+
+  async function handleBiometric() {
+    if (!selectedProfile) return;
+    setLoading(true);
+    setError("");
 
     const result = await authenticateBiometric();
-
     if (result === "ok") {
-      setBioState("idle");
-      doLogin(role, profileName);
+      doLogin(selectedProfile.role, selectedProfile.label);
     } else if (result === "unavailable") {
-      // Dispositivo sem biometria — entra direto
-      setBioState("idle");
-      doLogin(role, profileName);
+      setError("Biometria não disponível neste dispositivo.");
+      setLoading(false);
     } else {
-      setBioState("error");
-      setBioMsg("Biometria não confirmada. Toque no perfil para tentar novamente.");
+      setError("Falha na biometria. Use sua senha.");
+      setLoading(false);
     }
   }
 
@@ -114,7 +148,7 @@ export default function ProfileSelector({ onSelect }: ProfileSelectorProps = {})
       padding: 24, background: "#0d0d14",
     }}>
 
-      {/* Ícone — tesoura igual ao ícone do app */}
+      {/* Ícone */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 40 }}>
         <div style={{
           width: 72, height: 72, borderRadius: 20,
@@ -132,58 +166,147 @@ export default function ProfileSelector({ onSelect }: ProfileSelectorProps = {})
         <p style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: "0.25em", marginTop: 4 }}>DOMÍNIO PRO</p>
       </div>
 
-      {/* Perfis */}
       <div style={{ width: "100%", maxWidth: 360 }}>
-        <p style={{
-          fontSize: 11, color: "rgba(255,255,255,0.4)",
-          textTransform: "uppercase", letterSpacing: "0.2em",
-          textAlign: "center", marginBottom: 16,
-        }}>Selecione seu perfil</p>
+        {!selectedProfile ? (
+          <>
+            <p style={{
+              fontSize: 11, color: "rgba(255,255,255,0.4)",
+              textTransform: "uppercase", letterSpacing: "0.2em",
+              textAlign: "center", marginBottom: 16,
+            }}>Selecione seu perfil</p>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
-          {profiles.map(p => (
-            <button
-              key={p.role}
-              type="button"
-              disabled={bioState === "checking"}
-              onClick={() => handleSelect(p.role, p.label)}
-              style={{
-                display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-                padding: "18px 8px", borderRadius: 16,
-                border: "2px solid rgba(255,255,255,0.1)",
-                background: "rgba(255,255,255,0.04)",
-                cursor: bioState === "checking" ? "wait" : "pointer",
-                transition: "all 0.15s",
-                opacity: bioState === "checking" ? 0.5 : 1,
-              }}
-            >
-              <span style={{ fontSize: 28 }}>{p.emoji}</span>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 700, color: "#fff", margin: 0 }}>{p.label}</p>
-                <p style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{p.sublabel}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              {profiles.map(p => (
+                <button
+                  key={p.role}
+                  type="button"
+                  onClick={() => handleProfileClick(p.role, p.label)}
+                  style={{
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+                    padding: "18px 8px", borderRadius: 16,
+                    border: "2px solid rgba(255,255,255,0.1)",
+                    background: "rgba(255,255,255,0.04)",
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  <span style={{ fontSize: 28 }}>{p.emoji}</span>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "#fff", margin: 0 }}>{p.label}</p>
+                    <p style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{p.sublabel}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            borderRadius: 24,
+            padding: 24,
+            display: "flex",
+            flexDirection: "column",
+            gap: 20,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ fontSize: 32 }}>
+                {profiles.find(p => p.role === selectedProfile.role)?.emoji}
               </div>
-            </button>
-          ))}
-        </div>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ color: "#fff", fontSize: 18, fontWeight: 700, margin: 0 }}>{selectedProfile.label}</h2>
+                <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, margin: 0 }}>Digite sua senha para entrar</p>
+              </div>
+              <button 
+                onClick={() => setSelectedProfile(null)}
+                style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 12 }}
+              >
+                Alterar
+              </button>
+            </div>
 
-        {bioState === "checking" && (
-          <div style={{
-            marginTop: 20, padding: "14px", borderRadius: 12,
-            background: `${accent}15`, border: `1px solid ${accent}40`,
-            textAlign: "center",
-          }}>
-            <p style={{ color: accent, fontSize: 13, margin: 0 }}>🔐 Verificando identidade...</p>
-            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 4 }}>Use sua impressão digital</p>
-          </div>
-        )}
+            <div style={{ position: "relative" }}>
+              <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "rgba(255,255,255,0.3)" }}>
+                <Lock size={16} />
+              </div>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Sua senha"
+                autoFocus
+                onKeyDown={e => e.key === "Enter" && handleLogin()}
+                style={{
+                  width: "100%",
+                  background: "rgba(0,0,0,0.2)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12,
+                  padding: "12px 40px",
+                  color: "#fff",
+                  fontSize: 16,
+                  outline: "none",
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "none",
+                  border: "none",
+                  color: "rgba(255,255,255,0.3)",
+                  cursor: "pointer",
+                }}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
 
-        {bioState === "error" && (
-          <div style={{
-            marginTop: 16, padding: "12px", borderRadius: 10,
-            background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
-            textAlign: "center",
-          }}>
-            <p style={{ color: "#ef4444", fontSize: 12, margin: 0 }}>{bioMsg}</p>
+            {error && (
+              <p style={{ color: "#ef4444", fontSize: 12, margin: "-10px 0 0 4px" }}>{error}</p>
+            )}
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={handleLogin}
+                disabled={loading || password.length < 4}
+                style={{
+                  flex: 1,
+                  background: accent,
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 12,
+                  padding: "14px",
+                  fontWeight: 600,
+                  cursor: (loading || password.length < 4) ? "not-allowed" : "pointer",
+                  opacity: (loading || password.length < 4) ? 0.5 : 1,
+                }}
+              >
+                {loading ? "Entrando..." : "Entrar"}
+              </button>
+              
+              <button
+                onClick={handleBiometric}
+                disabled={loading}
+                title="Usar Biometria"
+                style={{
+                  width: 54,
+                  background: "rgba(255,255,255,0.08)",
+                  color: "#fff",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 12,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <Fingerprint size={24} />
+              </button>
+            </div>
           </div>
         )}
       </div>
