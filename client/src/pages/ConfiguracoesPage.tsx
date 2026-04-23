@@ -107,13 +107,13 @@ export default function ConfiguracoesPage() {
   const [showPwd, setShowPwd] = useState<Record<string, boolean>>({});
 
   const updateAccess = (key: keyof AccessConfig, value: any) => {
-    setAccess(prev => {
-      const next = { ...prev, [key]: value };
-      saveAccessConfig(next);
-      // Notifica App.tsx que o controle de acesso foi atualizado
-      window.dispatchEvent(new Event("salon_config_updated"));
-      return next;
-    });
+    setAccess(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveAccess = () => {
+    saveAccessConfig(access);
+    window.dispatchEvent(new Event("salon_config_updated"));
+    toast.success("Configurações de acesso salvas!");
   };
 
   const toggleShowPwd = (key: string) =>
@@ -591,6 +591,10 @@ export default function ConfiguracoesPage() {
               ✓ Controle de acesso ativo. Na próxima abertura do app será solicitada a senha.
             </div>
           )}
+
+          <Button onClick={handleSaveAccess} className="w-full gap-2 mt-2" variant="secondary">
+            <Save className="w-4 h-4" />Salvar Senhas e Acessos
+          </Button>
         </CardContent>
       </Card>
 
