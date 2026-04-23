@@ -135,21 +135,14 @@ export function loadAccessConfig(): AccessConfig {
     const s = localStorage.getItem("salon_config");
     if (s) {
       const c = JSON.parse(s);
-      // Forçamos a habilitação dos perfis para garantir que apareçam na tela de login
       return { 
         ...DEFAULT_ACCESS_CONFIG, 
-        ...c.access,
-        managerEnabled: true,
-        employeesAccessEnabled: true
+        ...c.access
       };
     }
   } catch { /* ignore */ }
   
-  return { 
-    ...DEFAULT_ACCESS_CONFIG,
-    managerEnabled: true,
-    employeesAccessEnabled: true
-  };
+  return DEFAULT_ACCESS_CONFIG;
 }
 
 export function saveAccessConfig(access: AccessConfig): void {
@@ -162,7 +155,7 @@ export function saveAccessConfig(access: AccessConfig): void {
 }
 
 // Verifica se o controle de acesso está ativado
-// ALTERAÇÃO: Retornando false para desativar a trava de senha temporariamente
 export function isAccessControlEnabled(): boolean {
-  return false; 
+  const cfg = loadAccessConfig();
+  return !!(cfg.ownerPassword && cfg.ownerPassword.length >= 4);
 }
