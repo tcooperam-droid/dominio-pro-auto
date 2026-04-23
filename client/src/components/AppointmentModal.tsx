@@ -466,13 +466,14 @@ export default function AppointmentModal({
                     </div>
                     {/* Card de histórico do cliente */}
                     {(() => {
+                      // Filtrar agendamentos apenas do cliente selecionado
                       const clientAppts = appointmentsStore.list({})
                         .filter(a => a.clientId === clientId && a.status === "completed")
                         .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
                       if (clientAppts.length === 0) return null;
                       const totalGasto = clientAppts.reduce((s, a) => s + (a.totalPrice || 0), 0);
                       const ultima = clientAppts[0];
-                      // Count service frequency
+                      // Contar frequência de serviços APENAS deste cliente
                       const svcFreq = new Map<string, number>();
                       clientAppts.forEach(a => a.services?.forEach(s => svcFreq.set(s.name, (svcFreq.get(s.name) ?? 0) + 1)));
                       const topServices = Array.from(svcFreq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
