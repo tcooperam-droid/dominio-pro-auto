@@ -228,19 +228,14 @@ export default function AppointmentModal({
   };
 
   const handleSelectClient = (client: typeof allClients[0]) => {
-    // 1. Primeiro, limpa qualquer estado de serviço anterior para garantir que não haja mistura
-    if (!isEditing) {
-      setSelectedServices([]);
-    }
-
-    // 2. Define o novo cliente
+    // 1. Define o novo cliente primeiro
     setClientId(client.id);
     setClientName(client.name);
     setClientSearch("");
 
-    // 3. ─── Preenchimento automático baseado EXCLUSIVAMENTE no histórico DESTE cliente ───
+    // 2. ─── Preenchimento automático (Opção 1) ───
     if (!isEditing) {
-      // Buscamos TODOS os agendamentos do cache para filtrar apenas os deste cliente específico
+      // Buscamos o histórico real deste cliente específico
       const allAppts = appointmentsStore.list({});
       const clientAppts = allAppts
         .filter(a => a.clientId === client.id && a.status === "completed")
@@ -249,12 +244,12 @@ export default function AppointmentModal({
       if (clientAppts.length > 0) {
         const lastAppt = clientAppts[0];
 
-        // Sugere o funcionário que atendeu este cliente da última vez
+        // Define o funcionário da última vez
         if (lastAppt.employeeId) {
           setEmployeeId(String(lastAppt.employeeId));
         }
 
-        // Identifica os serviços da última visita deste cliente (considerando grupos/visitas múltiplas)
+        // Recupera os serviços da última visita (incluindo grupos se houver)
         let lastVisitServices = lastAppt.services ?? [];
         if (lastAppt.groupId) {
           const groupAppts = clientAppts
@@ -264,7 +259,7 @@ export default function AppointmentModal({
         }
 
         if (lastVisitServices.length > 0) {
-          // Mapeia os serviços para o formato do estado local, garantindo que venham do histórico do cliente
+          // Preenche AUTOMATICAMENTE a lista de serviços
           const servicesToSet = lastVisitServices.map(s => ({
             serviceId: s.serviceId,
             name: s.name,
@@ -275,10 +270,12 @@ export default function AppointmentModal({
           }));
           
           setSelectedServices(servicesToSet);
-          toast.info(`Sugestão: Carregados os últimos serviços de ${client.name}.`);
+          toast.success(`Serviços de ${client.name} preenchidos automaticamente.`);
+        } else {
+          setSelectedServices([]);
         }
       } else {
-        // Se o cliente não tem histórico, garantimos que a lista de serviços esteja vazia
+        // Se não tem histórico, garante que comece limpo
         setSelectedServices([]);
       }
     }
@@ -817,4 +814,4 @@ export default function AppointmentModal({
       </DialogContent>
     </Dialog>
   );
-            }
+  }
