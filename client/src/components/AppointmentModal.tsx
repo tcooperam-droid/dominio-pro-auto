@@ -176,46 +176,7 @@ export default function AppointmentModal({
       setStartTime(`${h}:${m}`);
       setStatus("scheduled");
       setNotes("");
-      
-      // ─── Pré-preenchimento para clientes recorrentes ───
-      if (clientId) {
-        const allAppts = appointmentsStore.list({});
-        const clientAppts = allAppts
-          .filter(a => a.clientId === clientId && a.status === "completed")
-          .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-
-        if (clientAppts.length > 0) {
-          const lastAppt = clientAppts[0];
-
-          // Pré-preenche com o funcionário anterior
-          if (lastAppt.employeeId && !defaultEmployeeId) {
-            setEmployeeId(String(lastAppt.employeeId));
-          }
-
-          // Se o último agendamento faz parte de um grupo, reconstitui todos os serviços da visita
-          if (!groupClientName) {
-            let lastVisitServices = lastAppt.services ?? [];
-            if (lastAppt.groupId) {
-              const groupAppts = clientAppts
-                .filter(a => a.groupId === lastAppt.groupId)
-                .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-              lastVisitServices = groupAppts.flatMap(a => a.services ?? []);
-            }
-            if (lastVisitServices.length > 0) {
-              setSelectedServices(lastVisitServices.map(s => ({
-                serviceId: s.serviceId,
-                name: s.name,
-                price: s.price,
-                durationMinutes: s.durationMinutes,
-                color: s.color,
-                materialCostPercent: s.materialCostPercent ?? 0,
-              })));
-            }
-          }
-        }
-      } else {
-        setSelectedServices([]);
-      }
+      setSelectedServices([]);
     }
   }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData]);
 
@@ -268,6 +229,42 @@ export default function AppointmentModal({
     setClientId(client.id);
     setClientName(client.name);
     setClientSearch("");
+
+    // Ao selecionar um cliente, buscar automaticamente a última visita e sugerir serviços
+    const allAppts = appointmentsStore.list({});
+    const clientAppts = allAppts
+      .filter(a => a.clientId === client.id && a.status === "completed")
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+
+    if (clientAppts.length > 0) {
+      const ultima = clientAppts[0];
+      
+      // Carregar funcionário habitual se não houver um padrão
+      if (ultima.employeeId && !employeeId) {
+        setEmployeeId(String(ultima.employeeId));
+      }
+
+      // Carregar serviços da última visita se nenhum serviço foi selecionado ainda
+      if (selectedServices.length === 0) {
+        const lastVisitSvcs = ultima.groupId
+          ? allAppts.filter(a => a.groupId === ultima.groupId && a.clientId === client.id)
+              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+              .flatMap(a => a.services ?? [])
+          : (ultima.services ?? []);
+
+        if (lastVisitSvcs.length > 0) {
+          setSelectedServices(lastVisitSvcs.map(s => ({
+            serviceId: s.serviceId,
+            name: s.name,
+            price: s.price,
+            durationMinutes: s.durationMinutes,
+            color: s.color,
+            materialCostPercent: s.materialCostPercent ?? 0,
+          })));
+          toast.success("Serviços da última visita carregados automaticamente!");
+        }
+      }
+    }
   };
 
   const handleCreateNewClient = async () => {
