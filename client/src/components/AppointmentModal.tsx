@@ -176,7 +176,11 @@ export default function AppointmentModal({
       setStartTime(`${h}:${m}`);
       setStatus("scheduled");
       setNotes("");
-      setSelectedServices([]);
+      
+      // Limpa serviços ao abrir novo agendamento sem grupo
+      if (!groupClientName) {
+        setSelectedServices([]);
+      }
     }
   }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData]);
 
@@ -230,30 +234,32 @@ export default function AppointmentModal({
     setClientName(client.name);
     setClientSearch("");
 
-    // Ao selecionar um cliente, buscar automaticamente a última visita e sugerir serviços
-    const allAppts = appointmentsStore.list({});
-    const clientAppts = allAppts
-      .filter(a => a.clientId === client.id && a.status === "completed")
-      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    // ─── Sugestão baseada no histórico do cliente ───
+    if (!isEditing && selectedServices.length === 0) {
+      const allAppts = appointmentsStore.list({});
+      const clientAppts = allAppts
+        .filter(a => a.clientId === client.id && a.status === "completed")
+        .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
-    if (clientAppts.length > 0) {
-      const ultima = clientAppts[0];
-      
-      // Carregar funcionário habitual se não houver um padrão
-      if (ultima.employeeId && !employeeId) {
-        setEmployeeId(String(ultima.employeeId));
-      }
+      if (clientAppts.length > 0) {
+        const lastAppt = clientAppts[0];
 
-      // Carregar serviços da última visita se nenhum serviço foi selecionado ainda
-      if (selectedServices.length === 0) {
-        const lastVisitSvcs = ultima.groupId
-          ? allAppts.filter(a => a.groupId === ultima.groupId && a.clientId === client.id)
-              .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-              .flatMap(a => a.services ?? [])
-          : (ultima.services ?? []);
+        // Sugere o funcionário habitual
+        if (lastAppt.employeeId && !employeeId) {
+          setEmployeeId(String(lastAppt.employeeId));
+        }
 
-        if (lastVisitSvcs.length > 0) {
-          setSelectedServices(lastVisitSvcs.map(s => ({
+        // Sugere os serviços da última visita
+        let lastVisitServices = lastAppt.services ?? [];
+        if (lastAppt.groupId) {
+          const groupAppts = clientAppts
+            .filter(a => a.groupId === lastAppt.groupId)
+            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+          lastVisitServices = groupAppts.flatMap(a => a.services ?? []);
+        }
+
+        if (lastVisitServices.length > 0) {
+          setSelectedServices(lastVisitServices.map(s => ({
             serviceId: s.serviceId,
             name: s.name,
             price: s.price,
@@ -261,7 +267,7 @@ export default function AppointmentModal({
             color: s.color,
             materialCostPercent: s.materialCostPercent ?? 0,
           })));
-          toast.success("Serviços da última visita carregados automaticamente!");
+          toast.info(`Sugestão: Últimos serviços de ${client.name} carregados.`);
         }
       }
     }
@@ -463,14 +469,13 @@ export default function AppointmentModal({
                     </div>
                     {/* Card de histórico do cliente */}
                     {(() => {
-                      // Filtrar agendamentos apenas do cliente selecionado
                       const clientAppts = appointmentsStore.list({})
                         .filter(a => a.clientId === clientId && a.status === "completed")
                         .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
                       if (clientAppts.length === 0) return null;
                       const totalGasto = clientAppts.reduce((s, a) => s + (a.totalPrice || 0), 0);
                       const ultima = clientAppts[0];
-                      // Contar frequência de serviços APENAS deste cliente
+                      // Count service frequency
                       const svcFreq = new Map<string, number>();
                       clientAppts.forEach(a => a.services?.forEach(s => svcFreq.set(s.name, (svcFreq.get(s.name) ?? 0) + 1)));
                       const topServices = Array.from(svcFreq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
