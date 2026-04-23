@@ -176,11 +176,9 @@ export default function AppointmentModal({
       setStartTime(`${h}:${m}`);
       setStatus("scheduled");
       setNotes("");
-      
-      // Limpa serviços ao abrir novo agendamento
       setSelectedServices([]);
     }
-  }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData, selectedDate]);
+  }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData]);
 
   const addService = (serviceId: string) => {
     if (!serviceId) return;
@@ -228,55 +226,47 @@ export default function AppointmentModal({
   };
 
   const handleSelectClient = (client: typeof allClients[0]) => {
-    // 1. Define o novo cliente primeiro
     setClientId(client.id);
     setClientName(client.name);
     setClientSearch("");
 
-    // 2. ─── Preenchimento automático (Opção 1) ───
-    if (!isEditing) {
-      // Buscamos o histórico real deste cliente específico
-      const allAppts = appointmentsStore.list({});
-      const clientAppts = allAppts
-        .filter(a => a.clientId === client.id && a.status === "completed")
-        .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    // Buscar histórico para preenchimento automático
+    const allAppts = appointmentsStore.list({});
+    
+    // Filtrar agendamentos do cliente (por ID ou por nome para máxima compatibilidade)
+    const clientAppts = allAppts
+      .filter(a => {
+        const isSameId = client.id && a.clientId === client.id;
+        const isSameName = client.name && a.clientName?.toLowerCase().trim() === client.name.toLowerCase().trim();
+        return (isSameId || isSameName) && a.status === "completed";
+      })
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
 
-      if (clientAppts.length > 0) {
-        const lastAppt = clientAppts[0];
+    if (clientAppts.length > 0) {
+      const ultima = clientAppts[0];
+      
+      // Carregar funcionário habitual (o que atendeu na última visita concluída)
+      if (ultima.employeeId) {
+        setEmployeeId(String(ultima.employeeId));
+      }
 
-        // Define o funcionário da última vez
-        if (lastAppt.employeeId) {
-          setEmployeeId(String(lastAppt.employeeId));
-        }
+      // Preencher automaticamente os serviços da última visita
+      const lastVisitSvcs = ultima.groupId
+        ? allAppts.filter(a => a.groupId === ultima.groupId && (a.clientId === client.id || a.clientName === client.name))
+            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+            .flatMap(a => a.services ?? [])
+        : (ultima.services ?? []);
 
-        // Recupera os serviços da última visita (incluindo grupos se houver)
-        let lastVisitServices = lastAppt.services ?? [];
-        if (lastAppt.groupId) {
-          const groupAppts = clientAppts
-            .filter(a => a.groupId === lastAppt.groupId)
-            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-          lastVisitServices = groupAppts.flatMap(a => a.services ?? []);
-        }
-
-        if (lastVisitServices.length > 0) {
-          // Preenche AUTOMATICAMENTE a lista de serviços
-          const servicesToSet = lastVisitServices.map(s => ({
-            serviceId: s.serviceId,
-            name: s.name,
-            price: s.price,
-            durationMinutes: s.durationMinutes,
-            color: s.color,
-            materialCostPercent: s.materialCostPercent ?? 0,
-          }));
-          
-          setSelectedServices(servicesToSet);
-          toast.success(`Serviços de ${client.name} preenchidos automaticamente.`);
-        } else {
-          setSelectedServices([]);
-        }
-      } else {
-        // Se não tem histórico, garante que comece limpo
-        setSelectedServices([]);
+      if (lastVisitSvcs.length > 0) {
+        setSelectedServices(lastVisitSvcs.map(s => ({
+          serviceId: s.serviceId,
+          name: s.name,
+          price: s.price,
+          durationMinutes: s.durationMinutes,
+          color: s.color,
+          materialCostPercent: s.materialCostPercent ?? 0,
+        })));
+        toast.success("Últimos serviços agendados carregados automaticamente!");
       }
     }
   };
@@ -477,32 +467,23 @@ export default function AppointmentModal({
                     </div>
                     {/* Card de histórico do cliente */}
                     {(() => {
+                      // Filtrar agendamentos do cliente (por ID ou por nome para garantir compatibilidade)
                       const clientAppts = appointmentsStore.list({})
-                        .filter(a => a.clientId === clientId && a.status === "completed")
+                        .filter(a => {
+                          const isSameId = clientId && a.clientId === clientId;
+                          const isSameName = clientName && a.clientName?.toLowerCase().trim() === clientName.toLowerCase().trim();
+                          return (isSameId || isSameName) && a.status === "completed";
+                        })
                         .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-                      if (clientAppts.length === 0) return null;
                       
+                      if (clientAppts.length === 0) return null;
                       const totalGasto = clientAppts.reduce((s, a) => s + (a.totalPrice || 0), 0);
                       const ultima = clientAppts[0];
-                      
-                      // Identifica os serviços da última visita (considerando grupos)
-                      const lastVisitSvcs = ultima.groupId
-                        ? clientAppts.filter(a => a.groupId === ultima.groupId)
-                            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-                            .flatMap(a => a.services ?? [])
-                        : (ultima.services ?? []);
-
-                      // Verifica se os serviços atuais já são os da última visita
-                      const isShowingLastVisit = selectedServices.length > 0 && 
-                        lastVisitSvcs.length === selectedServices.length &&
-                        lastVisitSvcs.every(ls => selectedServices.some(ss => ss.serviceId === ls.serviceId));
-
-                      // Count service frequency
+                      // Contar frequência de serviços APENAS deste cliente
                       const svcFreq = new Map<string, number>();
                       clientAppts.forEach(a => a.services?.forEach(s => svcFreq.set(s.name, (svcFreq.get(s.name) ?? 0) + 1)));
                       const topServices = Array.from(svcFreq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
                       const lastEmp = employees.find(e => e.id === ultima.employeeId);
-                      
                       return (
                         <div className="p-2.5 rounded-lg bg-secondary/40 border border-border space-y-2">
                           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
@@ -522,62 +503,58 @@ export default function AppointmentModal({
                               <p className="text-[9px] text-muted-foreground">última</p>
                             </div>
                           </div>
-
-                          <div className="flex flex-col gap-2 pt-1">
-                            {/* Botão de Repetir Última Visita - Destaque Visual */}
-                            {!isShowingLastVisit && lastVisitSvcs.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedServices(lastVisitSvcs.map(s => ({
-                                    serviceId: s.serviceId,
-                                    name: s.name,
-                                    price: s.price,
-                                    durationMinutes: s.durationMinutes,
-                                    color: s.color,
-                                    materialCostPercent: s.materialCostPercent ?? 0,
-                                  })));
-                                  if (ultima.employeeId) {
-                                    setEmployeeId(String(ultima.employeeId));
-                                  }
-                                  toast.success("Serviços da última visita carregados!");
-                                }}
-                                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-primary/50 bg-primary/10 text-xs font-bold text-primary hover:bg-primary/20 transition-all shadow-sm animate-pulse"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5" />
-                                Carregar última visita ({lastVisitSvcs.map(s => s.name).join(", ")})
-                              </button>
-                            )}
-
-                            {topServices.length > 0 && (
-                              <div className="space-y-1 border-t border-border/50 pt-2">
-                                <p className="text-[9px] text-muted-foreground font-medium">Serviços frequentes:</p>
-                                <div className="flex flex-wrap gap-1">
-                                  {topServices.map(([name, count]) => {
-                                    const svc = servicesData.find(s => s.name === name);
-                                    return (
-                                      <button
-                                        key={name}
-                                        type="button"
-                                        onClick={() => svc && addService(String(svc.id))}
-                                        className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary/60 border border-border hover:bg-primary/10 hover:border-primary/30 transition-colors text-[10px]"
-                                      >
-                                        <span className="text-foreground">{name}</span>
-                                        <span className="text-primary font-bold">{count}x</span>
-                                      </button>
-                                    );
-                                  })}
+                          {topServices.length > 0 && (
+                            <div className="space-y-0.5">
+                              <p className="text-[9px] text-muted-foreground">Serviços frequentes:</p>
+                              {topServices.map(([name, count]) => (
+                                <div key={name} className="flex items-center justify-between text-xs">
+                                  <span className="text-foreground truncate">{name}</span>
+                                  <span className="text-muted-foreground text-[10px]">{count}x</span>
                                 </div>
-                              </div>
-                            )}
-                            
-                            {lastEmp && (
-                              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground border-t border-border/50 pt-2">
-                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: lastEmp.color }} />
-                                Profissional habitual: <span className="font-medium text-foreground">{lastEmp.name}</span>
-                              </div>
-                            )}
-                          </div>
+                              ))}
+                            </div>
+                          )}
+                          {lastEmp && (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: lastEmp.color }} />
+                              Profissional habitual: <span className="font-medium text-foreground">{lastEmp.name.split(" ")[0]}</span>
+                            </div>
+                          )}
+                          {/* Repeat last services button */}
+                          {ultima.services?.length > 0 && selectedServices.length === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Reconstitui todos os serviços da última visita (incluindo grupo)
+                                const lastVisitSvcs = ultima.groupId
+                                  ? clientAppts.filter(a => a.groupId === ultima.groupId)
+                                      .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+                                      .flatMap(a => a.services ?? [])
+                                  : (ultima.services ?? []);
+                                setSelectedServices(lastVisitSvcs.map(s => ({
+                                  serviceId: s.serviceId,
+                                  name: s.name,
+                                  price: s.price,
+                                  durationMinutes: s.durationMinutes,
+                                  color: s.color,
+                                  materialCostPercent: s.materialCostPercent ?? 0,
+                                })));
+                                if (ultima.employeeId && !employeeId) {
+                                  setEmployeeId(String(ultima.employeeId));
+                                }
+                                toast.success("Serviços da última visita carregados!");
+                              }}
+                              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              Repetir última visita ({
+                                (ultima.groupId
+                                  ? clientAppts.filter(a => a.groupId === ultima.groupId).flatMap(a => a.services ?? [])
+                                  : (ultima.services ?? [])
+                                ).map(s => s.name).join(", ")
+                              })
+                            </button>
+                          )}
                         </div>
                       );
                     })()}
