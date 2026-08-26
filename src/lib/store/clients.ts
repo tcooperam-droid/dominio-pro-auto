@@ -129,6 +129,7 @@ export const clientsStore = {
   async fetchAll(): Promise<Client[]> {
     const data = await fetchAllFromTable("clients", "name");
     cache.clients = data.map(toClient);
+    window.dispatchEvent(new Event("clients_updated"));
     return cache.clients;
   },
 
@@ -156,6 +157,7 @@ export const clientsStore = {
 
     const cli = toClient(row);
     cache.clients.push(cli);
+    window.dispatchEvent(new Event("clients_updated"));
 
     logDb("clients.create:success", cli);
 
@@ -186,6 +188,7 @@ export const clientsStore = {
 
     const created = (rows ?? []).map(toClient);
     cache.clients.push(...created);
+    window.dispatchEvent(new Event("clients_updated"));
 
     return created;
   },
@@ -216,6 +219,7 @@ export const clientsStore = {
     const idx = cache.clients.findIndex(c => c.id === id);
 
     if (idx !== -1) cache.clients[idx] = cli;
+    window.dispatchEvent(new Event("clients_updated"));
 
     await addAuditLog("client", id, "update", `Cliente "${cli.name}" atualizado`);
 
@@ -230,6 +234,7 @@ export const clientsStore = {
     if (error) throw error;
 
     cache.clients = cache.clients.filter(c => c.id !== id);
+    window.dispatchEvent(new Event("clients_updated"));
 
     if (cli) {
       await addAuditLog("client", id, "delete", `Cliente "${cli.name}" removido`);
@@ -242,5 +247,6 @@ export const clientsStore = {
     if (error) throw error;
 
     cache.clients = [];
+    window.dispatchEvent(new Event("clients_updated"));
   },
 };
