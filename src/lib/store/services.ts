@@ -28,7 +28,7 @@ export const servicesStore = {
         duration_minutes: data.durationMinutes,
         price: data.price,
         material_cost_percent: data.materialCostPercent,
-        commission_mode: data.commissionMode,
+        commission_mode: "cost_first",
         color: data.color,
         active: data.active,
       })
@@ -46,14 +46,15 @@ export const servicesStore = {
   },
 
   async update(id: number, data: Partial<Service>): Promise<Service | null> {
-    const p: any = {};
+    const p: any = { commission_mode: "cost_first" };
 
     if (data.name !== undefined) p.name = data.name;
     if (data.description !== undefined) p.description = data.description;
     if (data.durationMinutes !== undefined) p.duration_minutes = data.durationMinutes;
     if (data.price !== undefined) p.price = data.price;
     if (data.materialCostPercent !== undefined) p.material_cost_percent = data.materialCostPercent;
-    if (data.commissionMode !== undefined) p.commission_mode = data.commissionMode;
+    // A regra de comissão é única no sistema; normaliza registros legados ao salvar.
+    p.commission_mode = "cost_first";
     if (data.color !== undefined) p.color = data.color;
     if (data.active !== undefined) p.active = data.active;
 

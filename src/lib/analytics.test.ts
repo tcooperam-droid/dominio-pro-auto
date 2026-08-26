@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calcCommission,
   calcConversionRate,
   calcPeriodStats,
   isFinancialAppointment,
@@ -77,5 +78,16 @@ describe("regras do Financeiro baseadas na Agenda", () => {
     expect(calcConversionRate([
       appointment({ startTime: new Date().toISOString(), status: "scheduled" }),
     ])).toBeNull();
+  });
+
+  it("normaliza snapshots legados para custo compartilhado", () => {
+    const legacy = appointment({
+      services: [{
+        ...appointment().services[0],
+        commissionMode: "commission_first" as never,
+      }],
+    });
+
+    expect(calcCommission(legacy, employee)).toBe(8);
   });
 });

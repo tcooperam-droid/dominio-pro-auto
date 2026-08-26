@@ -119,7 +119,7 @@ export function toService(r: any): Service {
     durationMinutes: r.duration_minutes ?? 60,
     price: Number(r.price ?? 0),
     materialCostPercent: Number(r.material_cost_percent ?? 0),
-    commissionMode: r.commission_mode ?? "cost_first",
+    commissionMode: "cost_first",
     color: r.color ?? "#ec4899",
     active: r.active ?? true,
     createdAt: r.created_at,
@@ -153,7 +153,14 @@ export function toAppointment(r: any): Appointment {
     notes: r.notes ?? null,
     paymentStatus: r.payment_status ?? null,
     groupId: r.group_id ?? null,
-    services: r.services ?? [],
+    services: Array.isArray(r.services)
+      ? r.services.map((service: any) => ({
+          ...service,
+          serviceId: service.serviceId ?? service.service_id,
+          materialCostPercent: Number(service.materialCostPercent ?? service.material_cost_percent ?? 0),
+          commissionMode: "cost_first",
+        }))
+      : [],
     createdAt: r.created_at,
   };
 }

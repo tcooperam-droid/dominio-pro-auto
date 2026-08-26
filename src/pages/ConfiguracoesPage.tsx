@@ -20,8 +20,6 @@ import { usesServerAgentEndpoint } from "@/features/assistente/llmEndpoint";
 
 type BgType = "default" | "solid" | "gradient" | "image";
 
-type CommissionMode = "cost_first" | "commission_first";
-
 interface SalonConfig {
   salonName: string;
   ownerName: string;

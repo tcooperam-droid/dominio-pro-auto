@@ -120,7 +120,7 @@ export default function BackupPage() {
               name: s.name, description: s.description ?? null,
               durationMinutes: s.durationMinutes ?? 60, price: s.price ?? 0,
               materialCostPercent: s.materialCostPercent ?? 0,
-              commissionMode: s.commissionMode ?? "cost_first",
+              commissionMode: "cost_first",
               color: s.color ?? "#ec4899", active: s.active ?? true,
             });
           }
