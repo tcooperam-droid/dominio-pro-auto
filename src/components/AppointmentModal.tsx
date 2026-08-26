@@ -4,8 +4,9 @@
  * Suporta groupId para agrupar serviços do mesmo cliente.
  * INTEGRADO: Busca de clientes no clientsStore e criação de novos clientes.
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import { format, addMinutes, parseISO } from "date-fns";
 import { safeFmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -16,15 +17,25 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Trash2, Clock, DollarSign, X, Link2, UserPlus, Search, RotateCcw, History } from "lucide-react";
+import { Plus, Trash2, Clock, DollarSign, X, Link2, UserPlus, Search, RotateCcw, History, Sparkles } from "lucide-react";
 import { employeesStore } from "@/features/funcionarios";
 import { servicesStore } from "@/features/servicos";
 import { appointmentsStore, type Appointment, type AppointmentService } from "@/features/agenda";
 import { clientsStore } from "@/features/clientes";
+import {
+  getClientServiceRecurrence,
+  getMostFrequentCurrentService,
+  refreshAppointmentService,
+  toCurrentAppointmentService,
+} from "@/lib/serviceSuggestions";
 
 const STATUS_OPTIONS = [
   { value: "scheduled",   label: "Agendado"       },
@@ -75,6 +86,7 @@ export default function AppointmentModal({
   onAddGroupService,
 }: AppointmentModalProps) {
   const isEditing = !!appointment;
+  const storeVersion = useStoreVersion();
 
   // Client selection state
   const [clientName, setClientName]             = useState("");
@@ -91,13 +103,19 @@ export default function AppointmentModal({
   const [status, setStatus]                     = useState("scheduled");
   const [notes, setNotes]                       = useState("");
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
+  const [servicePickerOpen, setServicePickerOpen] = useState(false);
   const [loading, setLoading]                   = useState(false);
+  const formInitializedRef = useRef<string | null>(null);
+  const formKey = appointment
+    ? `edit:${appointment.id}`
+    : `new:${selectedDate}:${defaultEmployeeId ?? ""}:${defaultHour}:${defaultMinute}:${groupClientName ?? ""}:${incomingGroupId ?? ""}`;
 
-  const employees = useMemo(() => employeesStore.list(true), [open]);
-  const servicesData = useMemo(() => servicesStore.list(true), [open]);
+  const employees = useMemo(() => employeesStore.list(true), [open, storeVersion]);
+  const servicesData = useMemo(() => servicesStore.list(true), [open, storeVersion]);
   const [clientsKey, setClientsKey] = useState(0);
   const [appointmentsKey, setAppointmentsKey] = useState(0);
   const allClients = useMemo(() => clientsStore.list(), [open, clientsKey]);
+  const allAppointments = useMemo(() => appointmentsStore.list({}), [open, appointmentsKey]);
 
   useEffect(() => {
     const onClientsUpdate = () => setClientsKey(k => k + 1);
@@ -142,7 +160,13 @@ export default function AppointmentModal({
 
   // Populate form when modal opens
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      formInitializedRef.current = null;
+      return;
+    }
+    if (formInitializedRef.current === formKey) return;
+    formInitializedRef.current = formKey;
+    setServicePickerOpen(false);
     if (appointment) {
       setClientName(appointment.clientName ?? "");
       setClientId(appointment.clientId ?? null);
@@ -156,18 +180,9 @@ export default function AppointmentModal({
       setStatus(appointment.status);
       setNotes(appointment.notes ?? "");
       if (appointment.services?.length) {
-        setSelectedServices(appointment.services.map(s => {
-          const svc = servicesData.find(sv => sv.id === s.serviceId);
-          return {
-            serviceId: s.serviceId,
-            name: svc?.name ?? s.name ?? `Serviço #${s.serviceId}`,
-            price: s.price,
-            durationMinutes: svc?.durationMinutes ?? s.durationMinutes ?? 60,
-            color: svc?.color ?? s.color ?? "#ec4899",
-            materialCostPercent: svc?.materialCostPercent ?? s.materialCostPercent ?? 0,
-            commissionMode: "cost_first",
-          };
-        }));
+        setSelectedServices(appointment.services.map(service =>
+          refreshAppointmentService(service, servicesData)
+        ));
       } else {
         setSelectedServices([]);
       }
@@ -186,8 +201,26 @@ export default function AppointmentModal({
       setStatus("scheduled");
       setNotes("");
       setSelectedServices([]);
+      setServicePickerOpen(false);
     }
-  }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, servicesData]);
+  }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, incomingGroupId, formKey]);
+
+  // Se o cadastro de serviços mudar enquanto o modal estiver aberto, atualiza apenas os snapshots selecionados.
+  useEffect(() => {
+    if (!open || servicesData.length === 0) return;
+    setSelectedServices(current => {
+      const refreshed = current.map(service => refreshAppointmentService(service, servicesData));
+      const changed = refreshed.some((service, index) => {
+        const previous = current[index];
+        return service.name !== previous.name ||
+          service.price !== previous.price ||
+          service.durationMinutes !== previous.durationMinutes ||
+          service.color !== previous.color ||
+          service.materialCostPercent !== previous.materialCostPercent;
+      });
+      return changed ? refreshed : current;
+    });
+  }, [open, servicesData]);
 
   const addService = (serviceId: string) => {
     if (!serviceId) return;
@@ -241,45 +274,25 @@ export default function AppointmentModal({
     setClientName(client.name);
     setClientSearch("");
 
-    // Buscar histórico para preenchimento automático
-    const allAppts = appointmentsStore.list({});
-    
-    // Filtrar agendamentos do cliente (por ID ou por nome para máxima compatibilidade)
-    const clientAppts = allAppts
+    // A reincidência é calculada por serviceId nas visitas concluídas.
+    const clientAppts = allAppointments
       .filter(a => {
         const isSameId = client.id && a.clientId === client.id;
         const isSameName = client.name && a.clientName?.toLowerCase().trim() === client.name.toLowerCase().trim();
         return (isSameId || isSameName) && a.status === "completed";
       })
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
+    const suggestion = getMostFrequentCurrentService(clientAppts, servicesData);
 
-    if (clientAppts.length > 0) {
-      const ultima = clientAppts[0];
-      
-      // Carregar funcionário habitual (o que atendeu na última visita concluída)
-      if (ultima.employeeId) {
-        setEmployeeId(String(ultima.employeeId));
-      }
+    // Trocar cliente sem histórico não conserva por engano o serviço do cliente anterior.
+    setSelectedServices(suggestion?.service ? [toCurrentAppointmentService(suggestion.service)] : []);
 
-      // Preencher automaticamente os serviços da última visita
-      const lastVisitSvcs = ultima.groupId
-        ? allAppts.filter(a => a.groupId === ultima.groupId && (a.clientId === client.id || a.clientName === client.name))
-            .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
-            .flatMap(a => a.services ?? [])
-        : (ultima.services ?? []);
+    if (clientAppts[0]?.employeeId) {
+      setEmployeeId(String(clientAppts[0].employeeId));
+    }
 
-      if (lastVisitSvcs.length > 0) {
-        setSelectedServices(lastVisitSvcs.map(s => ({
-          serviceId: s.serviceId,
-          name: s.name,
-          price: s.price,
-          durationMinutes: s.durationMinutes,
-          color: s.color,
-          materialCostPercent: s.materialCostPercent ?? 0,
-          commissionMode: "cost_first",
-        })));
-        toast.success("Últimos serviços agendados carregados automaticamente!");
-      }
+    if (suggestion?.service) {
+      toast.success(`Sugestão carregada: ${suggestion.service.name} · R$ ${suggestion.service.price.toFixed(2)}`);
     }
   };
 
@@ -419,8 +432,8 @@ export default function AppointmentModal({
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[min(90vh,760px)] overflow-hidden flex flex-col gap-0 p-0">
+        <DialogHeader className="border-b border-border/60 px-6 pb-4 pt-6">
           <DialogTitle className="flex items-center gap-2">
             {isEditing ? "Editar Agendamento" : "Novo Agendamento"}
             {(isEditing ? appointment?.groupId : incomingGroupId) && (
@@ -431,7 +444,7 @@ export default function AppointmentModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-5">
           {/* Client Selection */}
           <div className="space-y-2">
             <Label>Cliente *</Label>
@@ -480,7 +493,7 @@ export default function AppointmentModal({
                     {/* Card de histórico do cliente */}
                     {(() => {
                       // Filtrar agendamentos do cliente (por ID ou por nome para garantir compatibilidade)
-                      const clientAppts = appointmentsStore.list({})
+                      const clientAppts = allAppointments
                         .filter(a => {
                           const isSameId = clientId && a.clientId === clientId;
                           const isSameName = clientName && a.clientName?.toLowerCase().trim() === clientName.toLowerCase().trim();
@@ -491,49 +504,40 @@ export default function AppointmentModal({
                       if (clientAppts.length === 0) return null;
                       const totalGasto = clientAppts.reduce((s, a) => s + (a.totalPrice || 0), 0);
                       const ultima = clientAppts[0];
-                      // Contar frequência de serviços APENAS deste cliente
-                      const svcFreq = new Map<string, number>();
-                      clientAppts.forEach(a => a.services?.forEach(s => svcFreq.set(s.name, (svcFreq.get(s.name) ?? 0) + 1)));
-                      const topServices = Array.from(svcFreq.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3);
+                      const topServices = getClientServiceRecurrence(clientAppts, servicesData).slice(0, 3);
+                      const suggestion = getMostFrequentCurrentService(clientAppts, servicesData);
                       const lastEmp = employees.find(e => e.id === ultima.employeeId);
                       return (
                         <div className="p-2.5 rounded-lg bg-secondary/40 border border-border space-y-2">
                           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1">
                             <History className="w-3 h-3" /> Histórico do Cliente
                           </p>
-                          <div className="grid grid-cols-3 gap-2 text-center">
-                            <div className="p-1.5 rounded-md bg-primary/10">
-                              <p className="text-sm font-bold text-primary">{clientAppts.length}</p>
-                              <p className="text-[9px] text-muted-foreground">visitas</p>
-                            </div>
-                            <div className="p-1.5 rounded-md bg-emerald-500/10">
-                              <p className="text-sm font-bold text-emerald-400">R$ {totalGasto.toFixed(0)}</p>
-                              <p className="text-[9px] text-muted-foreground">total</p>
-                            </div>
-                            <div className="p-1.5 rounded-md bg-blue-500/10">
-                              <p className="text-sm font-bold text-blue-400">{safeFmt(ultima.startTime, "dd/MM")}</p>
-                              <p className="text-[9px] text-muted-foreground">última</p>
-                            </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+                            <span>{clientAppts.length} visitas</span>
+                            <span>R$ {totalGasto.toFixed(0)} em serviços</span>
+                            <span>Última visita: {safeFmt(ultima.startTime, "dd/MM")}</span>
                           </div>
-                          {topServices.length > 0 && (
-                            <div className="space-y-0.5">
-                              <p className="text-[9px] text-muted-foreground">Serviços frequentes:</p>
-                              {topServices.map(([name, count]) => (
-                                <div key={name} className="flex items-center justify-between text-xs">
-                                  <span className="text-foreground truncate">{name}</span>
-                                  <span className="text-muted-foreground text-[10px]">{count}x</span>
+                          {suggestion?.service && (
+                            <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 p-2">
+                              <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
+                              <div className="min-w-0 flex-1 text-xs">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="font-medium text-primary">Mais recorrente</p>
+                                  <span className="shrink-0 text-[10px] text-primary">{suggestion.count}x</span>
                                 </div>
-                              ))}
+                                <p className="truncate text-foreground">{suggestion.service.name} · R$ {suggestion.service.price.toFixed(2)}</p>
+                                <p className="text-[10px] text-muted-foreground">Preço atual do cadastro · carregado automaticamente</p>
+                              </div>
                             </div>
                           )}
                           {lastEmp && (
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: lastEmp.color }} />
+                              <div className="h-2 w-2 rounded-full" style={{ backgroundColor: lastEmp.color }} />
                               Profissional habitual: <span className="font-medium text-foreground">{lastEmp.name.split(" ")[0]}</span>
                             </div>
                           )}
                           {/* Repeat last services button */}
-                          {ultima.services?.length > 0 && selectedServices.length === 0 && (
+                          {ultima.services?.length > 0 && (
                             <button
                               type="button"
                               onClick={() => {
@@ -543,29 +547,19 @@ export default function AppointmentModal({
                                       .sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
                                       .flatMap(a => a.services ?? [])
                                   : (ultima.services ?? []);
-                                setSelectedServices(lastVisitSvcs.map(s => ({
-                                  serviceId: s.serviceId,
-                                  name: s.name,
-                                  price: s.price,
-                                  durationMinutes: s.durationMinutes,
-                                  color: s.color,
-                                  materialCostPercent: s.materialCostPercent ?? 0,
-                                  commissionMode: "cost_first",
-                                })));
+                                setSelectedServices(lastVisitSvcs.map(service =>
+                                  refreshAppointmentService(service, servicesData)
+                                ));
                                 if (ultima.employeeId && !employeeId) {
                                   setEmployeeId(String(ultima.employeeId));
                                 }
                                 toast.success("Serviços da última visita carregados!");
                               }}
-                              className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+                              className="w-full flex items-center justify-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                              title="Substituir a sugestão pelos serviços da última visita"
                             >
-                              <RotateCcw className="w-3 h-3" />
-                              Repetir última visita ({
-                                (ultima.groupId
-                                  ? clientAppts.filter(a => a.groupId === ultima.groupId).flatMap(a => a.services ?? [])
-                                  : (ultima.services ?? [])
-                                ).map(s => s.name).join(", ")
-                              })
+                              <RotateCcw className="h-3 w-3" />
+                              Usar serviços da última visita
                             </button>
                           )}
                         </div>
@@ -638,6 +632,13 @@ export default function AppointmentModal({
           </div>
 
           {/* Employee + Date + Time */}
+          <div className="flex items-center gap-2 border-t border-border/60 pt-1">
+            <Clock className="h-4 w-4 text-primary" />
+            <div>
+              <p className="text-sm font-semibold">Quando e com quem</p>
+              <p className="text-[11px] text-muted-foreground">Defina o profissional, a data e o horário.</p>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label>Funcionário *</Label>
@@ -667,7 +668,10 @@ export default function AppointmentModal({
 
           {/* Services */}
           <div className="space-y-2">
-            <Label>Serviços *</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Serviços *</Label>
+              <span className="text-[10px] text-muted-foreground">Preço atual do cadastro</span>
+            </div>
             {selectedServices.length > 0 && (
               <div className="space-y-1.5">
                 {selectedServices.map(svc => (
@@ -688,27 +692,49 @@ export default function AppointmentModal({
               </div>
             )}
             {availableServices.length > 0 && (
-              <Select onValueChange={addService} value="">
-                <SelectTrigger className="border-dashed">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Plus className="w-3.5 h-3.5" />
-                    <span className="text-sm">Adicionar serviço</span>
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  {availableServices.map(svc => (
-                    <SelectItem key={svc.id} value={String(svc.id)}>
-                      <div className="flex items-center gap-2 w-full">
-                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: svc.color }} />
-                        <span className="flex-1">{svc.name}</span>
-                        <span className="text-muted-foreground text-xs ml-2">
-                          {svc.durationMinutes}min — R$ {svc.price.toFixed(2)}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={servicePickerOpen} onOpenChange={setServicePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    aria-expanded={servicePickerOpen}
+                    aria-haspopup="listbox"
+                    className="w-full justify-start border-dashed font-normal"
+                  >
+                    <Plus className="mr-2 h-3.5 w-3.5" />
+                    <span className="text-sm text-muted-foreground">Adicionar serviço</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-[min(28rem,calc(100vw-2rem))] p-0">
+                  <Command>
+                    <CommandInput placeholder="Buscar serviço..." />
+                    <CommandList className="max-h-64 overflow-y-auto overscroll-contain">
+                      <CommandEmpty>Nenhum serviço disponível.</CommandEmpty>
+                      <CommandGroup heading="Serviços disponíveis">
+                        {availableServices.map(svc => (
+                          <CommandItem
+                            key={svc.id}
+                            value={`${svc.name} ${svc.id}`}
+                            onSelect={() => {
+                              addService(String(svc.id));
+                              setServicePickerOpen(false);
+                            }}
+                            className="cursor-pointer"
+                          >
+                            <div className="flex w-full min-w-0 items-center gap-2">
+                              <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: svc.color }} />
+                              <span className="min-w-0 flex-1 truncate">{svc.name}</span>
+                              <span className="shrink-0 text-xs text-muted-foreground">
+                                {svc.durationMinutes}min · R$ {svc.price.toFixed(2)}
+                              </span>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             )}
           </div>
 
@@ -730,23 +756,29 @@ export default function AppointmentModal({
           <Separator />
 
           {/* Status + Notes */}
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label>Status</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map(opt => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {isEditing && (
+            <div className="space-y-3 border-t border-border/60 pt-4">
+              <div>
+                <p className="text-sm font-semibold">Detalhes do agendamento</p>
+                <p className="text-[11px] text-muted-foreground">Use o status apenas quando estiver editando um registro existente.</p>
+              </div>
+              <div className="space-y-1">
+                <Label>Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-1">
-              <Label>Observações</Label>
-              <Textarea value={notes} onChange={e => setNotes(e.target.value)}
-                placeholder="Preferências, observações..." rows={2} />
-            </div>
+          )}
+          <div className="space-y-1">
+            <Label>Observações <span className="font-normal text-muted-foreground">(opcional)</span></Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)}
+              placeholder="Preferências, observações..." rows={2} />
           </div>
 
           {/* Group siblings */}
@@ -776,7 +808,7 @@ export default function AppointmentModal({
           )}
 
           {/* Add another service for same client */}
-          {onAddGroupService && (
+          {onAddGroupService && (isEditing || incomingGroupId) && (
             <button
               type="button"
               onClick={handleAddGroupService}
@@ -789,7 +821,7 @@ export default function AppointmentModal({
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:gap-0">
+        <DialogFooter className="border-t border-border/60 bg-background/95 px-6 py-4 gap-2 sm:gap-0">
           {isEditing && (
             <Button variant="ghost" className="text-destructive hover:text-destructive mr-auto"
               onClick={handleDelete} disabled={loading}>
