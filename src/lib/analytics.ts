@@ -19,13 +19,20 @@ import { ptBR } from "date-fns/locale";
 
 export const toNum = (v: unknown) => parseFloat(String(v ?? 0)) || 0;
 
-/** Regra Central: Se tem valor, entra no faturamento */
-export const isFinancialAppointment = (a: Appointment) => toNum(a.totalPrice) > 0;
-
+/**
+ * Regra central do negócio: a Agenda é a fonte de verdade.
+ * Um agendamento existente com valor entra no Financeiro mesmo que continue
+ * como `scheduled`; somente alterações explícitas que invalidam o agendamento
+ * deixam de participar dos indicadores.
+ */
 export const EXCLUDED = ["cancelled", "no_show"] as const;
-/** Mantido para compatibilidade, mas a regra financeira agora é isFinancialAppointment */
+export const isFinancialAppointment = (a: Appointment) =>
+  !EXCLUDED.includes(a.status as typeof EXCLUDED[number]) && toNum(a.totalPrice) > 0;
+
+/** Mantido para compatibilidade com consumidores antigos. */
 export const isValid = (a: Appointment) => isFinancialAppointment(a);
-export const isCompleted = (a: Appointment) => a.status === "completed" && toNum(a.totalPrice) > 0;
+export const isCompleted = (a: Appointment) =>
+  a.status === "completed" && toNum(a.totalPrice) > 0;
 
 export type Period = "hoje" | "semana" | "mes" | "trimestre" | "ano" | "custom";
 
@@ -105,7 +112,9 @@ export function calcPeriodStats(appts: Appointment[], employees: Employee[]): Pe
   const empMap = new Map(employees.map(e => [e.id, e]));
 
   const valid     = appts.filter(isFinancialAppointment);
-  const future    = appts.filter(a => ["scheduled", "confirmed"].includes(a.status) && new Date(a.startTime) > new Date());
+  const future    = appts.filter(a =>
+    isFinancialAppointment(a) && new Date(a.startTime) > new Date()
+  );
   const cancelled = appts.filter(a => EXCLUDED.includes(a.status as any));
 
   let totalRevenue     = 0;
@@ -247,18 +256,20 @@ export function calcTopClients(
     .slice(0, limit);
 }
 
-export function calcConversionRate(appts: Appointment[]): number {
-  const past90Start = subDays(new Date(), 90);
+export function calcConversionRate(appts: Appointment[]): number | null {
+  const now = new Date();
+  const past90Start = subDays(now, 90);
   const past = appts.filter(a => {
-    try { return parseISO(a.startTime) <= new Date() && parseISO(a.startTime) >= past90Start; }
-    catch { return false; }
+    try {
+      const date = parseISO(a.startTime);
+      return date <= now && date >= past90Start;
+    } catch { return false; }
   });
 
-  const completed  = past.filter(a => a.status === "completed").length;
-  const terminal   = past.filter(a => ["completed", "cancelled", "no_show"].includes(a.status)).length;
+  const completed = past.filter(a => a.status === "completed").length;
+  const terminal = past.filter(a => ["completed", "cancelled", "no_show"].includes(a.status)).length;
 
-  if (terminal === 0) return 0.85; 
-  return completed / terminal;
+  return terminal === 0 ? null : completed / terminal;
 }
 
 export function calcClientReturnFrequency(appts: Appointment[]): number {
@@ -330,11 +341,12 @@ export function calcMostProfitableServices(appts: Appointment[]): {
 export function calcWeeklyRevenue(
   appts: Appointment[],
   weeks: number = 8,
+  asOf: Date = new Date(),
 ): { weekLabel: string; revenue: number; count: number }[] {
   const result: { weekLabel: string; revenue: number; count: number }[] = [];
 
   for (let i = weeks - 1; i >= 0; i--) {
-    const refDate  = subWeeks(new Date(), i);
+    const refDate  = subWeeks(asOf, i);
     const wStart   = startOfWeek(refDate, { weekStartsOn: 1 });
     const wEnd     = endOfWeek(refDate, { weekStartsOn: 1 });
     const label    = format(wStart, "dd/MM", { locale: ptBR });
@@ -342,7 +354,7 @@ export function calcWeeklyRevenue(
     const weekAppts = appts.filter(a => {
       try {
         const d = parseISO(a.startTime);
-        return isWithinInterval(d, { start: wStart, end: wEnd });
+        return d <= asOf && isWithinInterval(d, { start: wStart, end: wEnd });
       } catch { return false; }
     }).filter(isFinancialAppointment);
 
