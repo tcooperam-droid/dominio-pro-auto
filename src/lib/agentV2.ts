@@ -35,6 +35,18 @@ import {
   addFeedback as memoryAddFeedback,
   refreshPreferences,
 } from "./agentMemory";
+import {
+  buildScheduleTimes,
+  extractLocalScheduleHints,
+  intervalsOverlap,
+  isCancellation,
+  isConfirmation,
+  isExplicitScheduleOverride,
+  localDateKey,
+  localTimeKey,
+  normalizeTime as normalizeScheduleTime,
+  resolveDate as resolveScheduleDate,
+} from "./agentSchedule";
 
 // ─── Tipos públicos ───────────────────────────────────────
 
@@ -96,7 +108,7 @@ export function clearHistory(): void {
 
 interface PendingAction {
   action: ActionPayload;
-  type: "conflict" | "professional";
+  type: "conflict" | "professional" | "confirmation" | "override";
   timestamp: number;
 }
 
@@ -105,7 +117,7 @@ interface ActionPayload {
   params: Record<string, unknown>;
 }
 
-function savePendingAction(action: ActionPayload, type: "conflict" | "professional"): void {
+function savePendingAction(action: ActionPayload, type: "conflict" | "professional" | "confirmation" | "override"): void {
   try {
     const data: PendingAction = { action, type, timestamp: Date.now() };
     localStorage.setItem(PENDING_KEY, JSON.stringify(data));
@@ -136,7 +148,7 @@ function clearPendingAction(): void {
 // ─── Helpers de data/hora ─────────────────────────────────
 
 function getTodayStr(): string {
-  return new Date().toISOString().split("T")[0];
+  return localDateKey(new Date())!;
 }
 
 function getDayOfWeek(dateStr: string): number {
@@ -149,70 +161,30 @@ function timeToMinutes(t: string): number {
 }
 
 function normalizeTime(raw: string): string | null {
-  if (!raw) return null;
-  let t = raw.toLowerCase().replace(/h/gi, ":").replace(/\s+/g, "").trim();
-  t = t.replace(/:$/, "");
-  if (/^\d{1,2}$/.test(t)) t = `${t.padStart(2, "0")}:00`;
-  if (/^\d{1,2}:\d{2}$/.test(t)) {
-    const [h, m] = t.split(":");
-    const hh = parseInt(h);
-    const mm = parseInt(m);
-    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
-    return `${h.padStart(2, "0")}:${m}`;
-  }
-  return null;
+  return normalizeScheduleTime(raw);
 }
 
-function resolveDate(raw: string): string {
-  const today = new Date();
-  const r = (raw || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
+function resolveDate(raw: string): string | null {
+  return resolveScheduleDate(raw);
+}
 
-  if (!r || r === "hoje") return today.toISOString().split("T")[0];
+function listAppointmentsByLocalDate(date: string): Appointment[] {
+  return appointmentsStore.list({}).filter((appointment) => localDateKey(appointment.startTime) === date);
+}
 
-  if (r === "amanha") {
-    const d = new Date(today);
-    d.setDate(today.getDate() + 1);
-    return d.toISOString().split("T")[0];
-  }
+let schedulingDataPromise: Promise<void> | null = null;
 
-  const dayMap: Record<string, number> = {
-    domingo: 0, segunda: 1, terca: 2,
-    quarta: 3, quinta: 4, sexta: 5, sabado: 6,
-    "segunda-feira": 1, "terca-feira": 2,
-    "quarta-feira": 3, "quinta-feira": 4, "sexta-feira": 5,
-  };
-  if (dayMap[r] !== undefined) {
-    const target = dayMap[r];
-    const current = today.getDay();
-    let diff = target - current;
-    if (diff <= 0) diff += 7;
-    const d = new Date(today);
-    d.setDate(today.getDate() + diff);
-    return d.toISOString().split("T")[0];
-  }
-
-  if (/^\d{1,2}\/\d{1,2}/.test(r)) {
-    const [dd, mm, yy] = r.split("/");
-    const year = yy ? (parseInt(yy) < 100 ? 2000 + parseInt(yy) : parseInt(yy)) : today.getFullYear();
-    const month = parseInt(mm);
-    const day = parseInt(dd);
-    const d = new Date(year, month - 1, day);
-    // Validar data (ex: 31/02 é inválido)
-    if (d.getMonth() !== month - 1 || d.getDate() !== day) return today.toISOString().split("T")[0];
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  }
-
-  if (/^\d{1,2}$/.test(r)) {
-    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${r.padStart(2, "0")}`;
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(r)) return r;
-
-  return r;
+async function refreshSchedulingData(): Promise<void> {
+  if (schedulingDataPromise) return schedulingDataPromise;
+  schedulingDataPromise = Promise.all([
+    clientsStore.fetchAll(),
+    servicesStore.fetchAll(),
+    employeesStore.fetchAll(),
+    appointmentsStore.fetchAll(),
+  ]).then(() => undefined).finally(() => {
+    schedulingDataPromise = null;
+  });
+  return schedulingDataPromise;
 }
 
 // ─── Validação de horário de trabalho ─────────────────────
@@ -291,13 +263,13 @@ function isWithinWorkingHours(
 
 function getTodayData(): string {
   const today = getTodayStr();
-  const appts = appointmentsStore.list({ date: today });
+  const appts = listAppointmentsByLocalDate(today);
   const emps = employeesStore.list(true);
   if (appts.length === 0) return `Hoje (${today}): nenhum agendamento.`;
   const lines = appts.map((a) => {
     const emp = emps.find((e) => e.id === a.employeeId);
-    const hora = a.startTime?.split("T")[1]?.slice(0, 5) ?? "";
-    const horaFim = a.endTime?.split("T")[1]?.slice(0, 5) ?? "";
+    const hora = localTimeKey(a.startTime) ?? "";
+    const horaFim = localTimeKey(a.endTime) ?? "";
     const svcs = a.services?.map((s) => s.name).join(", ") ?? "";
     return `  - ${hora}-${horaFim} | ${a.clientName} | ${svcs} | Prof: ${emp?.name ?? "?"} | ${a.status} | ID:${a.id}`;
   });
@@ -343,7 +315,8 @@ function getEmployeesData(): string {
 
 function getApptsByDate(dateStr: string): string {
   const date = resolveDate(dateStr);
-  const appts = appointmentsStore.list({ date });
+  if (!date) return `Data inválida: "${dateStr}".`;
+  const appts = listAppointmentsByLocalDate(date);
   const emps = employeesStore.list(true);
   if (appts.length === 0) return `Nenhum agendamento em ${date}.`;
 
@@ -420,7 +393,7 @@ async function getClientWithHistory(query: string): Promise<string> {
     const last = lastByClient.get(c.id);
     if (last) {
       const lastSvc = last.services?.[0]?.name ?? "";
-      const lastDate = last.startTime?.split("T")[0] ?? "";
+      const lastDate = localDateKey(last.startTime) ?? "";
       line += ` | Último serviço: ${lastSvc} em ${lastDate}`;
     }
     lines.push(line);
@@ -613,9 +586,10 @@ REGRAS:
 12. Se o caixa não estiver aberto e o usuário perguntar sobre financeiro, mencione isso. NUNCA bloqueie agendamentos por causa do caixa — agendamentos funcionam independente do caixa
 13. HORÁRIOS OCUPADOS: cada agendamento tem um profissional (Prof: NOME). Um horário só está ocupado para um profissional SE houver agendamento com AQUELE profissional naquele horário. Agendamentos de outros profissionais NÃO bloqueiam o horário do profissional solicitado
 14. Ao sugerir horários disponíveis, liste APENAS os horários que NÃO têm agendamento para o profissional específico solicitado
-15. NUNCA peça confirmação mais de uma vez para o mesmo agendamento — se já confirmou, execute a ação diretamente
-16. OVERRIDE DE HORÁRIO: Se o usuário disser "agenda mesmo assim" após bloqueio de horário, execute a ação normalmente adicionando forceSchedule:true nos params. O sistema vai ignorar a restrição de horário
-17. Se o usuário ensinar "lembra que [funcionário] atende qualquer dia" ou similar, confirme e oriente que na próxima vez o agendamento será liberado automaticamente
+15. Para todo agendamento novo, o sistema exibirá um resumo e pedirá uma confirmação explícita antes de gravar; não diga que foi agendado antes do retorno da ação
+16. Se houver conflito, nunca force por conta própria. Só prossiga depois que o usuário confirmar explicitamente o conflito pendente
+17. Fora do expediente, só prossiga depois que o usuário disser exatamente "agenda mesmo assim"; a palavra "sim" sozinha não libera horário fora do expediente
+18. Se o usuário ensinar "lembra que [funcionário] atende qualquer dia" ou similar, confirme e oriente que na próxima vez o agendamento será liberado automaticamente
 
 AÇÕES — inclua ao final da resposta quando executar operação:
 \`\`\`action
@@ -633,13 +607,15 @@ IMPORTANTE:
 - NÃO inclua clientId — o SISTEMA resolve o cliente pelo nome automaticamente
 - Use o nome EXATO como aparece nos dados (ex: "JOAO DA SILVA", não "João")
 - Se houver múltiplos clientes com o mesmo nome nos dados, PERGUNTE qual deles antes de agendar
-- Se cliente não existe no sistema, use criar_cliente ANTES de agendar
-- NÃO verifique conflitos — o SISTEMA faz isso automaticamente
-- SEMPRE inclua o bloco action quando tiver todos os dados necessários
+- Se cliente não existe no sistema, não crie cadastro sem uma solicitação clara do usuário
+- NÃO decida sozinho ignorar conflitos, expediente ou qualquer regra de agenda
+- SEMPRE inclua o bloco action quando tiver todos os dados necessários; o sistema fará a validação antes de gravar
 - Se falta informação, pergunte o que falta — NÃO inclua action
-- NUNCA confirme operação antes do retorno do sistema
-- NUNCA diga "realizando", "vou agendar", "efetuando" sem incluir o bloco action — isso engana o usuário
-- Se tiver todos os dados necessários, inclua o bloco action IMEDIATAMENTE sem anunciar o que vai fazer
+- Para agendamento novo, o sistema sempre mostrará um resumo e pedirá confirmação antes de gravar
+- NUNCA diga que agendou, cancelou ou moveu antes de receber o resultado real do sistema
+- NUNCA inclua \`confirmed\`, \`forceConflict\` ou \`forceSchedule\` no action inicial; esses campos só aparecem no fluxo interno após confirmação explícita
+- Se o usuário responder apenas “sim” a uma pergunta de conflito ou confirmação, o sistema executará a ação pendente uma única vez
+- Para fora do expediente, só aceite a frase explícita “agenda mesmo assim”; não interprete “sim” como autorização de horário
 - date pode ser: "hoje", "amanha", "DD/MM", dia da semana, ou YYYY-MM-DD
 ${buildMemoryPrompt()}`;
 }
@@ -692,6 +668,8 @@ async function callLLM(
           throw new Error("Token inválido. Verifique seu GitHub PAT em: github.com/settings/tokens");
         if (res.status === 429)
           throw new Error("Limite de requisições atingido. Aguarde alguns segundos.");
+        if (res.status === 410)
+          throw new Error("O serviço GitHub Models está temporariamente indisponível (HTTP 410).");
         throw new Error(`Erro ${res.status}`);
       }
 
@@ -700,7 +678,7 @@ async function callLLM(
     } catch (err) {
       lastErr = err;
       if (err instanceof DOMException && err.name === "AbortError") break; // timeout não faz retry
-      if ((err as any)?.message?.includes("401")) break; // auth error não faz retry
+      if ((err as any)?.message?.includes("401") || (err as any)?.message?.includes("410")) break; // auth/indisponibilidade não fazem retry
     }
   }
   clearTimeout(tmr);
@@ -711,9 +689,17 @@ async function callLLM(
 
 // ─── Execução de ações ────────────────────────────────────
 
-async function executeCreateClient(params: Record<string, unknown>): Promise<string> {
+async function executeCreateClient(params: Record<string, unknown>, allowPendingConfirmation = false): Promise<string> {
   const name = params.name ? String(params.name).trim() : null;
   if (!name) return "Nome do cliente é obrigatório para criar o cadastro.";
+
+  if (!allowPendingConfirmation) {
+    savePendingAction(
+      { type: "criar_cliente", params: { ...params, confirmed: true } },
+      "confirmation",
+    );
+    return `CONFIRMACAO:Não encontrei o cliente "${name}". Deseja criar esse cadastro${params.phone ? ` com telefone ${String(params.phone)}` : ""}? Responda sim ou não.`;
+  }
 
   // Verificar se já existe
   const allClients = await clientsStore.ensureLoaded();
@@ -769,17 +755,20 @@ async function executeSwapClient(params: Record<string, unknown>): Promise<strin
   return `Cliente trocado com sucesso!\nAgendamento ID:${apptId}\nNovo cliente: ${client.name}`;
 }
 
-async function executeAction(action: ActionPayload): Promise<string> {
+async function executeAction(action: ActionPayload, allowPendingConfirmation = false): Promise<string> {
   if (!action || !action.type || !action.params) {
     return "Ação inválida: estrutura incompleta. Tente reformular o pedido.";
   }
   const { type, params } = action;
   try {
-    if (type === "agendar") return await executeSchedule(params);
+    if (["agendar", "cancelar", "mover", "concluir", "trocar_cliente"].includes(type)) {
+      await refreshSchedulingData();
+    }
+    if (type === "agendar") return await executeSchedule(params, allowPendingConfirmation);
     if (type === "cancelar") return await executeCancel(params);
     if (type === "mover") return await executeMove(params);
     if (type === "concluir") return await executeComplete(params);
-    if (type === "criar_cliente") return await executeCreateClient(params);
+    if (type === "criar_cliente") return await executeCreateClient(params, allowPendingConfirmation);
     if (type === "trocar_cliente") return await executeSwapClient(params);
     return `Ação desconhecida: "${type}".`;
   } catch (err) {
@@ -796,7 +785,7 @@ async function executeCancel(params: Record<string, unknown>): Promise<string> {
   if (appt.status === "cancelled") return `Agendamento ID:${apptId} já está cancelado.`;
   await appointmentsStore.update(apptId, { status: "cancelled" });
   window.dispatchEvent(new Event("store_updated"));
-  const hora = appt.startTime?.split("T")[1]?.slice(0, 5) ?? "";
+  const hora = localTimeKey(appt.startTime) ?? "";
   return `Agendamento ID:${apptId} cancelado com sucesso.\nCliente: ${appt.clientName}\nHorário: ${hora}`;
 }
 
@@ -807,15 +796,13 @@ async function executeMove(params: Record<string, unknown>): Promise<string> {
 
   const resolvedDate = resolveDate(String(params.newDate ?? ""));
   const resolvedTime = normalizeTime(String(params.newTime ?? ""));
+  if (!resolvedDate) return `Data inválida: "${params.newDate}".`;
   if (!resolvedTime) return `Horário inválido: "${params.newTime}". Use HH:MM.`;
 
   const durMs = new Date(appt.endTime).getTime() - new Date(appt.startTime).getTime();
-  // Construir no horário LOCAL para evitar UTC shift
-  const [mYear, mMonth, mDay] = resolvedDate.split("-").map(Number);
-  const [mHour, mMin] = resolvedTime.split(":").map(Number);
-  const newStartDt = new Date(mYear, mMonth - 1, mDay, mHour, mMin, 0);
-  const newStart = newStartDt.toISOString().slice(0, 19);
-  const newEnd = new Date(newStartDt.getTime() + durMs).toISOString().slice(0, 19);
+  const movedTimes = buildScheduleTimes(resolvedDate, resolvedTime, durMs / 60_000);
+  if (!movedTimes) return "Não foi possível montar o novo horário.";
+  const { startTime: newStart, endTime: newEnd } = movedTimes;
 
   const emp = employeesStore.list(true).find((e) => e.id === appt.employeeId);
   if (emp) {
@@ -824,18 +811,14 @@ async function executeMove(params: Record<string, unknown>): Promise<string> {
   }
 
   // Verificar conflito
-  const conflict = appointmentsStore.list({ date: resolvedDate }).find((a) => {
+  const conflict = listAppointmentsByLocalDate(resolvedDate).find((a) => {
     if (a.id === appt.id || a.employeeId !== appt.employeeId || a.status === "cancelled") return false;
-    const aS = new Date(a.startTime).getTime();
-    const aE = new Date(a.endTime).getTime();
-    const rS = new Date(newStart).getTime();
-    const rE = new Date(newEnd).getTime();
-    return rS < aE && rE > aS;
+    return intervalsOverlap(a.startTime, a.endTime, newStart, newEnd);
   });
 
   if (conflict && !params.forceConflict) {
-    const cHora = conflict.startTime?.split("T")[1]?.slice(0, 5);
-    const cFim = conflict.endTime?.split("T")[1]?.slice(0, 5);
+    const cHora = localTimeKey(conflict.startTime);
+    const cFim = localTimeKey(conflict.endTime);
     savePendingAction(
       { type: "mover", params: { ...params, forceConflict: true } },
       "conflict",
@@ -857,7 +840,7 @@ async function executeComplete(params: Record<string, unknown>): Promise<string>
   return `Agendamento ID:${apptId} concluído!\nCliente: ${appt.clientName}`;
 }
 
-async function executeSchedule(params: Record<string, unknown>): Promise<string> {
+async function executeSchedule(params: Record<string, unknown>, allowPendingConfirmation = false): Promise<string> {
   // Ignorar clientId do LLM — sempre resolver pelo nome para evitar ID alucinado
   const serviceId = params.serviceId != null ? Number(params.serviceId) : null;
   const employeeId = params.employeeId != null ? Number(params.employeeId) : null;
@@ -867,6 +850,7 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
 
   const resolvedDate = resolveDate(date);
   const resolvedTime = normalizeTime(time);
+  if (!resolvedDate) return `Data inválida: "${date}".`;
   if (!resolvedTime)
     return `Horário inválido: "${time}". Use formato HH:MM (ex: 14:00, 9:30).`;
 
@@ -880,12 +864,18 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
     // 1a. Busca exata no cache
     client = allClients.find((c) => c.name.toLowerCase() === nameLower) ?? null;
 
-    // 1b. Busca parcial no cache
+    // 1b. Busca parcial no cache — nunca escolher homônimo arbitrariamente
     if (!client) {
-      client = allClients.find((c) => {
+      const matches = allClients.filter((c) => {
         const cn = c.name.toLowerCase();
         return cn.includes(nameLower) || nameLower.includes(cn);
-      }) ?? null;
+      });
+      if (matches.length === 1) {
+        client = matches[0];
+      } else if (matches.length > 1) {
+        const names = matches.slice(0, 5).map((c) => `${c.name} (ID:${c.id})`).join(", ");
+        return `Encontrei vários clientes com "${paramClientName}": ${names}. Qual deles?`;
+      }
     }
 
     // 1c. Por primeiro nome no cache
@@ -951,44 +941,61 @@ async function executeSchedule(params: Record<string, unknown>): Promise<string>
     return `AGUARDANDO_PROFISSIONAL:${lista}`;
   }
 
-  // 4. Validar horário de trabalho (ignora se forceSchedule=true)
-  if (!params.forceSchedule) {
+  // 4. Validar horário de trabalho (ignora somente após override explícito do usuário)
+  const scheduleOverride = allowPendingConfirmation && params.confirmed === true && params.forceSchedule === true;
+  if (!scheduleOverride) {
     const whCheck = isWithinWorkingHours(emp, resolvedDate, resolvedTime);
-    if (!whCheck.ok) return whCheck.message!;
+    if (!whCheck.ok) {
+      savePendingAction(
+        { type: "agendar", params: { ...params, clientName: client.name, confirmed: true, forceSchedule: true } },
+        "override",
+      );
+      return `FORA_HORARIO:${whCheck.message} Para continuar, responda exatamente "agenda mesmo assim".`;
+    }
   }
 
-  // 5. Calcular horários
+  // 5. Calcular horários no fuso local e serializar como instante ISO
   const durationMinutes = svc.durationMinutes > 0 ? svc.durationMinutes : 60;
-  // Construir data no horário LOCAL (sem UTC shift) para exibição correta na agenda
-  const [rYear, rMonth, rDay] = resolvedDate.split("-").map(Number);
-  const [rHour, rMin] = resolvedTime.split(":").map(Number);
-  const startDt = new Date(rYear, rMonth - 1, rDay, rHour, rMin, 0);
-  const endDt = new Date(startDt.getTime() + durationMinutes * 60_000);
-  const startTime = startDt.toISOString().slice(0, 19);
-  const endTime = endDt.toISOString().slice(0, 19);
+  const scheduleTimes = buildScheduleTimes(resolvedDate, resolvedTime, durationMinutes);
+  if (!scheduleTimes) return "Não foi possível montar o horário solicitado.";
+  const { startTime, endTime } = scheduleTimes;
 
   // 6. Verificar conflito
-  const conflict = appointmentsStore.list({ date: resolvedDate }).find((a) => {
+  const conflict = listAppointmentsByLocalDate(resolvedDate).find((a) => {
     if (a.employeeId !== emp!.id || a.status === "cancelled") return false;
-    const aS = new Date(a.startTime).getTime();
-    const aE = new Date(a.endTime).getTime();
-    const rS = new Date(startTime).getTime();
-    const rE = new Date(endTime).getTime();
-    return rS < aE && rE > aS;
+    return intervalsOverlap(a.startTime, a.endTime, startTime, endTime);
   });
 
-  if (conflict && !params.forceConflict) {
-    const conflictHour = conflict.startTime?.split("T")[1]?.slice(0, 5);
-    const conflictEnd = conflict.endTime?.split("T")[1]?.slice(0, 5);
+  const conflictOverride = allowPendingConfirmation && params.confirmed === true && params.forceConflict === true;
+  if (conflict && !conflictOverride) {
+    const conflictHour = localTimeKey(conflict.startTime);
+    const conflictEnd = localTimeKey(conflict.endTime);
     // Fix 3: salvar clientName EXATO do banco para re-execução correta
     savePendingAction(
-      { type: "agendar", params: { ...params, clientName: client.name, forceConflict: true } },
+      { type: "agendar", params: { ...params, clientName: client.name, forceConflict: true, confirmed: true } },
       "conflict",
     );
     return `CONFLITO:${emp.name} já tem agendamento das ${conflictHour} às ${conflictEnd} (${conflict.clientName ?? "cliente"}). Para forçar mesmo assim, confirme explicitamente.`;
   }
 
-  // 7. Criar agendamento
+  // 7. Confirmar antes de criar o registro
+  if (!(allowPendingConfirmation && params.confirmed === true)) {
+    savePendingAction(
+      { type: "agendar", params: { ...params, clientName: client.name, confirmed: true } },
+      "confirmation",
+    );
+    return [
+      "CONFIRMACAO:",
+      "Confira o agendamento:",
+      `Cliente: ${client.name}`,
+      `Serviço: ${svc.name} (${durationMinutes} min)`,
+      `Data: ${resolvedDate} às ${resolvedTime}`,
+      `Profissional: ${emp.name}`,
+      "Confirma? Responda sim ou não.",
+    ].join("\n");
+  }
+
+  // 8. Criar agendamento
   const serviceData: AppointmentService = {
     serviceId: svc.id,
     name: svc.name,
@@ -1037,7 +1044,79 @@ function isLikelyActionRequest(text: string): boolean {
 }
 
 function claimsActionSuccess(text: string): boolean {
-  return /\b(agendei|agendado com sucesso|marquei|cancelei|cancelado com sucesso|movi|reagendei|conclui|concluido com sucesso|feito|realizando o agendamento|vou agendar|agendamento realizado|efetuando|executando|processando o agendamento)\b/i.test(text);
+  return /\b(agendei|agendado com sucesso|marquei|cancelei|cancelado com sucesso|movi|reagendei|conclui|concluído com sucesso|agendamento realizado)\b/i.test(text);
+}
+
+function isScheduleMutationRequest(text: string): boolean {
+  return /\b(agendar|agendamento|marcar|marcado|reservar|reserva|criar horário|fazer um agendamento)\b/i.test(text)
+    && !/\b(quais|qual|listar|lista|ver|consultar|consulta|mostrar|mostre)\b/i.test(text);
+}
+
+function formatLocalActionResult(result: string): string {
+  if (result.startsWith("CONFIRMACAO:")) return result.replace("CONFIRMACAO:", "").trim();
+  if (result.startsWith("FORA_HORARIO:")) return result.replace("FORA_HORARIO:", "").trim();
+  if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+    return `Com qual profissional deseja agendar? Disponíveis: ${result.replace("AGUARDANDO_PROFISSIONAL:", "")}`;
+  }
+  if (result.startsWith("CONFLITO:")) {
+    return `Conflito de horário: ${result.replace("CONFLITO:", "")}\nDeseja agendar mesmo assim? Responda "sim" para confirmar.`;
+  }
+  return result;
+}
+
+async function handleLocalScheduleFallback(userMessage: string): Promise<AgentV2Response> {
+  if (!isScheduleMutationRequest(userMessage)) {
+    const asksToday = /\b(agenda|agendamentos|horários|compromissos)\b/i.test(userMessage)
+      && /\bhoje\b/i.test(userMessage);
+    const text = asksToday ? getTodayData() : "O serviço de IA está temporariamente indisponível. A Agenda continua acessível pelo menu principal.";
+    return { text, messageId: `m_${Date.now()}`, userMessage };
+  }
+
+  const hints = extractLocalScheduleHints(
+    userMessage,
+    clientsStore.list().map((client) => ({ id: client.id, name: client.name })),
+    servicesStore.list(true).map((service) => ({ id: service.id, name: service.name })),
+    employeesStore.list(true).map((employee) => ({ id: employee.id, name: employee.name })),
+  );
+
+  const missing: string[] = [];
+  if (!hints.clientName) missing.push("o nome exato do cliente");
+  if (!hints.serviceName) missing.push("o serviço");
+  if (!hints.date) missing.push("a data");
+  if (!hints.time) missing.push("o horário");
+  if (missing.length > 0) {
+    return {
+      text: `Não consegui consultar o LLM agora. Para agendar, informe ${missing.join(", ")}. Exemplo: “Agendar ${hints.clientName ?? "Maria da Silva"} para corte amanhã às 14h”.`,
+      messageId: `m_${Date.now()}`,
+      userMessage,
+    };
+  }
+
+  const service = servicesStore.list(true).find((item) => item.name.toLowerCase() === hints.serviceName!.toLowerCase());
+  const employee = hints.employeeName
+    ? employeesStore.list(true).find((item) => item.name.toLowerCase() === hints.employeeName!.toLowerCase())
+    : undefined;
+  if (!service) return { text: `Não encontrei o serviço “${hints.serviceName}” entre os serviços ativos.`, messageId: `m_${Date.now()}`, userMessage };
+
+  const result = await executeAction({
+    type: "agendar",
+    params: {
+      clientName: hints.clientName,
+      serviceId: service.id,
+      employeeId: employee?.id,
+      date: hints.date,
+      time: hints.time,
+    },
+  });
+  const text = formatLocalActionResult(result);
+  const actionExecuted = result.includes("criado com sucesso");
+  return {
+    text,
+    actionExecuted,
+    navigateTo: actionExecuted ? "/agenda" : undefined,
+    messageId: `m_${Date.now()}`,
+    userMessage,
+  };
 }
 
 // ─── Configuração e API pública ───────────────────────────
@@ -1103,6 +1182,17 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   }
 
   // ── 3. Fluxo normal: LLM + execução de ação ──
+  if (isLikelyActionRequest(msgTrimmed)) {
+    try {
+      await refreshSchedulingData();
+    } catch (error) {
+      console.error("[agentV2] Não foi possível atualizar a agenda:", error);
+      const text = "Não consegui atualizar os dados da agenda agora. Nenhum agendamento foi alterado; tente novamente em alguns segundos.";
+      addToHistory("user", msgTrimmed);
+      addToHistory("assistant", text);
+      return { text, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+    }
+  }
   addToHistory("user", msgTrimmed);
   const history = loadHistory().slice(0, -1);
   let systemData = "(dados indisponíveis)";
@@ -1119,7 +1209,13 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
     raw = await callLLM(buildSystemPrompt(cfg), history, msgTrimmed, systemData, cfg);
   } catch (err) {
     console.warn("[agentV2] callLLM falhou:", err);
-    const errText = `Erro: ${err instanceof Error ? err.message : "Tente novamente."}`;
+    const errorMessage = err instanceof Error ? err.message : "";
+    if (/\b410\b|temporariamente indisponível|retirement brownout/i.test(errorMessage)) {
+      const fallback = await handleLocalScheduleFallback(msgTrimmed);
+      addToHistory("assistant", fallback.text);
+      return fallback;
+    }
+    const errText = `Erro: ${errorMessage || "Tente novamente."}`;
     return { text: errText };
   }
 
@@ -1140,6 +1236,10 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
       } else if (result.startsWith("CONFLITO:")) {
         const detalhe = result.replace("CONFLITO:", "");
         text = `Conflito de horário: ${detalhe}\nDeseja agendar mesmo assim? Responda "sim" ou "forçar" para confirmar.`;
+      } else if (result.startsWith("FORA_HORARIO:")) {
+        text = result.replace("FORA_HORARIO:", "");
+      } else if (result.startsWith("CONFIRMACAO:")) {
+        text = result.replace("CONFIRMACAO:", "").trim();
       } else {
         text = result;
         actionExecuted =
@@ -1183,6 +1283,10 @@ Se não tiver TODOS os dados necessários, responda apenas: {}`,
               text = `Com qual profissional deseja agendar? Disponíveis: ${result.replace("AGUARDANDO_PROFISSIONAL:", "")}`;
             } else if (result.startsWith("CONFLITO:")) {
               text = `Conflito de horário: ${result.replace("CONFLITO:", "")}\nDeseja agendar mesmo assim?`;
+            } else if (result.startsWith("FORA_HORARIO:")) {
+              text = result.replace("FORA_HORARIO:", "");
+            } else if (result.startsWith("CONFIRMACAO:")) {
+              text = result.replace("CONFIRMACAO:", "").trim();
             } else {
               text = result;
               actionExecuted = result.includes("criado com sucesso") || result.includes("cancelado com sucesso") || result.includes("movido com sucesso");
@@ -1218,16 +1322,30 @@ async function handlePendingAction(
   pending: PendingAction,
   msgTrimmed: string,
 ): Promise<AgentV2Response | null> {
-  // ─ Conflito: usuário confirmando ─
-  if (pending.type === "conflict") {
-    if (/forç|forcar|força|mesmo\s*assim|pode|sim|confirma|confirmar|ok|claro|vai|manda|force|agendar/i.test(msgTrimmed)) {
+  // ─ Confirmação explícita ou override: usuário confirmando ─
+  if (pending.type === "confirmation" || pending.type === "conflict" || pending.type === "override") {
+    const accepted = pending.type === "override"
+      ? isExplicitScheduleOverride(msgTrimmed)
+      : isConfirmation(msgTrimmed);
+
+    if (accepted) {
       clearPendingAction();
       addToHistory("user", msgTrimmed);
-      const result = await executeAction(pending.action);
+      const result = await executeAction(pending.action, true);
 
       if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
         const lista = result.replace("AGUARDANDO_PROFISSIONAL:", "");
         const aviso = `Com qual profissional deseja agendar? Disponíveis: ${lista}`;
+        addToHistory("assistant", aviso);
+        return { text: aviso, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+      }
+      if (result.startsWith("CONFLITO:")) {
+        const aviso = `Conflito de horário: ${result.replace("CONFLITO:", "")}\nDeseja agendar mesmo assim? Responda "sim" para confirmar.`;
+        addToHistory("assistant", aviso);
+        return { text: aviso, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+      }
+      if (result.startsWith("FORA_HORARIO:")) {
+        const aviso = result.replace("FORA_HORARIO:", "");
         addToHistory("assistant", aviso);
         return { text: aviso, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
       }
@@ -1243,12 +1361,22 @@ async function handlePendingAction(
       };
     }
 
-    if (/nao|não|cancela|deixa|esquece|outro|nada/i.test(msgTrimmed)) {
+    if (isCancellation(msgTrimmed)) {
       clearPendingAction();
       addToHistory("user", msgTrimmed);
       const cancelMsg = "Ok, agendamento não realizado. Como posso ajudar?";
       addToHistory("assistant", cancelMsg);
       return { text: cancelMsg, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+    }
+
+    if (pending.type === "confirmation" || pending.type === "override") {
+      return {
+        text: pending.type === "override"
+          ? "Para esse horário, responda exatamente: agenda mesmo assim."
+          : "Responda sim para confirmar o agendamento ou não para cancelar.",
+        messageId: `m_${Date.now()}`,
+        userMessage: msgTrimmed,
+      };
     }
 
     clearPendingAction();
@@ -1257,6 +1385,14 @@ async function handlePendingAction(
 
   // ─ Profissional: usuário escolhendo ─
   if (pending.type === "professional") {
+    if (isCancellation(msgTrimmed)) {
+      clearPendingAction();
+      const cancelMsg = "Ok, agendamento não realizado. Como posso ajudar?";
+      addToHistory("user", msgTrimmed);
+      addToHistory("assistant", cancelMsg);
+      return { text: cancelMsg, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+    }
+
     const emps = employeesStore.list(true);
     const empName = msgTrimmed.toLowerCase();
 
@@ -1274,7 +1410,7 @@ async function handlePendingAction(
         ...pending.action,
         params: { ...pending.action.params, employeeId: emp.id },
       };
-      const result = await executeAction(updatedAction);
+      const result = await executeAction(updatedAction, false);
 
       if (result.startsWith("CONFLITO:")) {
         const detalhe = result.replace("CONFLITO:", "");

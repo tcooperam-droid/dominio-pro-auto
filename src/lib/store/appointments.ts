@@ -4,6 +4,7 @@ import { supabase } from "../supabase";
 import type { Appointment } from "./types";
 import { autoLaunchCashEntry } from "./cash";
 import { addAuditLog, cache, fetchAllFromTable, logDb, toAppointment } from "./shared";
+import { localDateKey } from "../agentSchedule";
 
 // ─── Appointments ────────────────────────────────────────
 
@@ -11,9 +12,9 @@ export const appointmentsStore = {
   list(filter?: { date?: string; employeeId?: number; startDate?: string; endDate?: string }): Appointment[] {
     let list = [...cache.appointments];
 
-    if (filter?.date) list = list.filter(a => a.startTime.startsWith(filter.date!));
-    if (filter?.startDate) list = list.filter(a => a.startTime.slice(0, 10) >= filter.startDate!);
-    if (filter?.endDate) list = list.filter(a => a.startTime.slice(0, 10) <= filter.endDate!);
+    if (filter?.date) list = list.filter(a => localDateKey(a.startTime) === filter.date);
+    if (filter?.startDate) list = list.filter(a => (localDateKey(a.startTime) ?? "") >= filter.startDate!);
+    if (filter?.endDate) list = list.filter(a => (localDateKey(a.startTime) ?? "") <= filter.endDate!);
     if (filter?.employeeId) list = list.filter(a => a.employeeId === filter.employeeId);
 
     return list;
@@ -198,7 +199,7 @@ export const appointmentsStore = {
 
   // Restaura a agenda de um dia a partir de um snapshot (para undo/redo)
   async restoreForDate(date: string, snapshot: Appointment[]): Promise<void> {
-    const current = cache.appointments.filter(a => a.startTime.startsWith(date));
+    const current = cache.appointments.filter(a => localDateKey(a.startTime) === date);
     const snapMap = new Map(snapshot.map(a => [a.id, a]));
     const currMap = new Map(current.map(a => [a.id, a]));
 

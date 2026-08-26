@@ -250,13 +250,20 @@ export async function addAuditLog(
   action: string,
   description: string,
 ): Promise<void> {
-  await supabase.from("audit_logs").insert({
-    entity_type: entityType,
-    entity_id: entityId,
-    action,
-    description,
-    user_name: "Admin",
-  });
+  try {
+    const { error } = await supabase.from("audit_logs").insert({
+      entity_type: entityType,
+      entity_id: entityId,
+      action,
+      description,
+      user_name: "Admin",
+    });
+    if (error) {
+      console.warn("[store] Registro de auditoria não gravado:", { entityType, entityId, action, error });
+    }
+  } catch (error) {
+    console.warn("[store] Falha não bloqueante no registro de auditoria:", { entityType, entityId, action, error });
+  }
 }
 
 // ─── Função de Busca em Lotes (Paginação Recursiva) ───────
