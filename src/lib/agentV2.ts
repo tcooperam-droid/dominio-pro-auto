@@ -1003,7 +1003,7 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
     durationMinutes: svc.durationMinutes ?? 60,
     color: svc.color ?? "#ec4899",
     materialCostPercent: svc.materialCostPercent ?? 0,
-    commissionMode: svc.commissionMode ?? "cost_first",
+    commissionMode: "cost_first",
   };
 
   const created = await appointmentsStore.create({

@@ -85,11 +85,6 @@ export function calcCommission(appt: Appointment, emp: Employee): number {
   return (appt.services ?? []).reduce((sum, s) => {
     const price = toNum(s.price);
     const matCost = price * (toNum(s.materialCostPercent) / 100);
-    const mode = s.commissionMode ?? "cost_first";
-
-    if (mode === "commission_first") {
-      return sum + (price * (emp.commissionPercent / 100));
-    }
     const base = Math.max(0, price - matCost);
     return sum + (base * (emp.commissionPercent / 100));
   }, 0);

@@ -165,7 +165,7 @@ export default function AppointmentModal({
             durationMinutes: svc?.durationMinutes ?? s.durationMinutes ?? 60,
             color: svc?.color ?? s.color ?? "#ec4899",
             materialCostPercent: svc?.materialCostPercent ?? s.materialCostPercent ?? 0,
-            commissionMode: svc?.commissionMode ?? s.commissionMode ?? "cost_first",
+            commissionMode: "cost_first",
           };
         }));
       } else {
@@ -201,14 +201,14 @@ export default function AppointmentModal({
       durationMinutes: svc.durationMinutes,
       color: svc.color,
       materialCostPercent: svc.materialCostPercent ?? 0,
-      commissionMode: svc.commissionMode ?? "cost_first",
+      commissionMode: "cost_first",
     }]);
   };
 
   const removeService = (serviceId: number) =>
     setSelectedServices(prev => prev.filter(s => s.serviceId !== serviceId));
 
-  const buildPayload = (gid?: string | null) => {
+  const buildPayload = (gid?: string | null): Omit<Appointment, "id" | "createdAt"> => {
     const [sh, sm] = startTime.split(":").map(Number);
     const base     = parseISO(apptDate);
     const startDt  = new Date(base.getFullYear(), base.getMonth(), base.getDate(), sh, sm);
@@ -231,7 +231,7 @@ export default function AppointmentModal({
         durationMinutes: s.durationMinutes,
         color: s.color,
         materialCostPercent: s.materialCostPercent ?? 0,
-        commissionMode: s.commissionMode ?? "cost_first",
+        commissionMode: "cost_first",
       })),
     };
   };
@@ -276,7 +276,7 @@ export default function AppointmentModal({
           durationMinutes: s.durationMinutes,
           color: s.color,
           materialCostPercent: s.materialCostPercent ?? 0,
-          commissionMode: s.commissionMode ?? "cost_first",
+          commissionMode: "cost_first",
         })));
         toast.success("Últimos serviços agendados carregados automaticamente!");
       }
@@ -550,7 +550,7 @@ export default function AppointmentModal({
                                   durationMinutes: s.durationMinutes,
                                   color: s.color,
                                   materialCostPercent: s.materialCostPercent ?? 0,
-                                  commissionMode: s.commissionMode ?? "cost_first",
+                                  commissionMode: "cost_first",
                                 })));
                                 if (ultima.employeeId && !employeeId) {
                                   setEmployeeId(String(ultima.employeeId));

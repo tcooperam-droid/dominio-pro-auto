@@ -12,17 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Pencil, Trash2, Scissors, Clock, DollarSign } from "lucide-react";
 import { servicesStore, type Service } from "@/features/servicos";
-import type { CommissionMode } from "@/features/servicos";
 
 const COLORS = ["#ec4899", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#3b82f6", "#84cc16", "#f97316", "#6366f1"];
 
 interface ServiceForm {
   name: string; description: string; durationMinutes: number;
   price: string; materialCostPercent: string; color: string; active: boolean;
-  commissionMode: CommissionMode;
+  commissionMode: "cost_first";
 }
 
 const defaultForm = (): ServiceForm => ({
@@ -50,7 +48,7 @@ export default function ServicosPage() {
       price: String(svc.price.toFixed(2)),
       materialCostPercent: String(svc.materialCostPercent ?? 0),
       color: svc.color, active: svc.active,
-      commissionMode: svc.commissionMode,
+      commissionMode: "cost_first",
     });
     setModalOpen(true);
   };
@@ -60,12 +58,12 @@ export default function ServicosPage() {
     if (!form.price || isNaN(parseFloat(form.price))) { toast.error("Preço inválido"); return; }
     setLoading(true);
     try {
-      const payload = {
+      const payload: Omit<Service, "id" | "createdAt"> = {
         name: form.name.trim(), description: form.description || null,
         durationMinutes: form.durationMinutes, price: parseFloat(form.price),
         materialCostPercent: parseFloat(form.materialCostPercent) || 0,
         color: form.color, active: form.active,
-        commissionMode: form.commissionMode,
+        commissionMode: "cost_first",
       };
       if (editingId) {
         await servicesStore.update(editingId, payload);
@@ -178,19 +176,11 @@ export default function ServicosPage() {
             </div>
             <div className="space-y-1">
               <Label>Regra de Comissão</Label>
-              <Select value={form.commissionMode} onValueChange={(v: any) => setForm(p => ({ ...p, commissionMode: v }))}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione a regra" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cost_first">Compartilhar Custos (Preço - Custo) × %</SelectItem>
-                  <SelectItem value="commission_first">Custo apenas Salão (Preço × %) - Custo</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm font-medium">
+                Compartilhar Custos (Preço − Custo do material) × %
+              </div>
               <p className="text-[10px] text-muted-foreground mt-1">
-                {form.commissionMode === "cost_first" 
-                  ? "O custo de material é deduzido do valor total antes de calcular a comissão do profissional."
-                  : "A comissão é calculada sobre o valor bruto. O custo de material é pago integralmente pelo salão."}
+                O custo de material é deduzido do valor do serviço antes de calcular a comissão do profissional.
               </p>
             </div>
             <div className="space-y-2">
