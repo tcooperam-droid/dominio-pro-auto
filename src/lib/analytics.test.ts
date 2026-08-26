@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { format } from "date-fns";
 import {
   calcCommission,
   calcConversionRate,
@@ -6,6 +7,7 @@ import {
   calcPeriodStats,
   isFinancialAppointment,
 } from "./analytics";
+import { getReportRange, shiftReportPeriod } from "./reportPeriods";
 import type { Appointment, Client, Employee } from "./store/types";
 
 const employee: Employee = {
@@ -79,6 +81,10 @@ function client(id: number, name: string): Client {
   };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("regras do Financeiro baseadas na Agenda", () => {
   it("considera um agendamento existente mesmo com status scheduled", () => {
     expect(isFinancialAppointment(appointment({ status: "scheduled" }))).toBe(true);
@@ -101,6 +107,46 @@ describe("regras do Financeiro baseadas na Agenda", () => {
       totalCommissions: 0,
       cancelCount: 2,
     });
+  });
+
+  it("separa realizado e futuro sem zerar a projeção do período", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T15:00:00.000Z"));
+
+    const realized = appointment({ id: 10, startTime: "2026-08-26T12:00:00.000Z" });
+    const future = appointment({ id: 11, startTime: "2026-08-26T18:00:00.000Z", totalPrice: 150 });
+    const cancelledFuture = appointment({ id: 12, startTime: "2026-08-26T19:00:00.000Z", status: "cancelled", totalPrice: 900 });
+    const noShowFuture = appointment({ id: 13, startTime: "2026-08-26T20:00:00.000Z", status: "no_show", totalPrice: 900 });
+
+    const realizedOnly = calcPeriodStats([realized], [employee]);
+    const futureOnly = calcPeriodStats([future, cancelledFuture, noShowFuture], [employee]);
+
+    expect(realizedOnly).toMatchObject({ totalRevenue: 100, count: 1, scheduledRevenue: 0, scheduledCount: 0 });
+    expect(futureOnly).toMatchObject({ totalRevenue: 150, count: 1, scheduledRevenue: 150, scheduledCount: 1, cancelCount: 2 });
+  });
+
+  it("calcula corretamente semana e mês totalmente futuros", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-26T15:00:00.000Z"));
+
+    const nextWeek = getReportRange("semana", new Date("2026-08-31T12:00:00.000Z"));
+    const nextMonth = getReportRange("mes", new Date("2026-09-10T12:00:00.000Z"));
+    const futureAppointment = appointment({ id: 20, startTime: "2026-09-02T12:00:00.000Z", totalPrice: 250 });
+    const futureStats = calcPeriodStats([futureAppointment], [employee]);
+
+    expect(format(nextWeek.start, "yyyy-MM-dd")).toBe("2026-08-31");
+    expect(format(nextWeek.end, "yyyy-MM-dd")).toBe("2026-09-06");
+    expect(format(nextMonth.start, "yyyy-MM-dd")).toBe("2026-09-01");
+    expect(futureStats.scheduledRevenue).toBe(250);
+    expect(futureStats.scheduledCount).toBe(1);
+  });
+
+  it("move o cursor exatamente um dia, uma semana ou um mês por vez", () => {
+    const base = new Date("2026-08-26T12:00:00.000Z");
+
+    expect(format(shiftReportPeriod(base, "dia", 1), "yyyy-MM-dd")).toBe("2026-08-27");
+    expect(format(shiftReportPeriod(base, "semana", -1), "yyyy-MM-dd")).toBe("2026-08-19");
+    expect(format(shiftReportPeriod(base, "mes", 1), "yyyy-MM-dd")).toBe("2026-09-26");
   });
 
   it("retorna ausência de dados em vez de uma taxa fixa quando não há eventos terminais", () => {

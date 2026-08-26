@@ -1,35 +1,37 @@
 /**
  * RelatoriosPage — Relatórios completos com comparativo de períodos e Visão Histórica.
- * Fonte de verdade: agendamentos (independente de status).
+ * Fonte de verdade: Agenda; agendamentos scheduled também valem, exceto cancelado/no-show.
  */
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStoreVersion } from "@/hooks/useStoreVersion";
-import { 
-  format, subDays, parseISO, startOfMonth, endOfMonth, 
-  subMonths, subYears, startOfYear, isWithinInterval 
+import {
+  addDays, endOfDay, endOfMonth, format, parseISO, startOfDay,
+  startOfMonth, startOfYear, subMonths, subWeeks, subYears,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell, Legend,
 } from "recharts";
 import { 
-  TrendingUp, Users, DollarSign, Award, Calendar, Scissors, 
-  Percent, ChevronRight, ArrowUpRight, ArrowDownRight, History, BarChart3
+  TrendingUp, Users, DollarSign, Award, Calendar, CalendarDays, Scissors,
+  Percent, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownRight, History, BarChart3
 } from "lucide-react";
 import { appointmentsStore } from "@/features/agenda";
 import { employeesStore } from "@/features/funcionarios";
 import {
-  calcPeriodStats, calcRevenueByDay, calcRevenueByEmployee,
-  calcPopularServices, getAppointmentsInPeriod, getPeriodDates,
+  calcPeriodStats, calcRevenueByEmployee,
+  calcPopularServices, getAppointmentsInPeriod,
   toNum, calcMonthlyHistory, calcYearlyHistory, isFinancialAppointment,
-  type Period,
 } from "@/features/relatorios";
 import { cn } from "@/lib/utils";
+import {
+  getReportRange,
+  shiftReportPeriod,
+  type ReportGranularity,
+} from "@/lib/reportPeriods";
 import {
   Table,
   TableBody,
@@ -42,15 +44,6 @@ import {
 const tooltipStyle = { backgroundColor: "hsl(240 6% 10%)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, color: "#fff", fontSize: 12 };
 const tickStyle = { fontSize: 11, fill: "hsl(0 0% 55%)" };
 
-const PERIODS: { key: Period; label: string }[] = [
-  { key: "hoje",      label: "Hoje"    },
-  { key: "semana",    label: "Semana"  },
-  { key: "mes",       label: "Mês"     },
-  { key: "trimestre", label: "90 dias" },
-  { key: "ano",       label: "Ano"     },
-  { key: "custom",    label: "Custom"  },
-];
-
 function fmt(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -60,39 +53,74 @@ function fmtPct(v: number) {
 }
 
 export default function RelatoriosPage() {
-  const [period, setPeriod]           = useState<Period>("mes");
-  const [customStart, setCustomStart] = useState(() => format(subDays(new Date(), 30), "yyyy-MM-dd"));
-  const [customEnd, setCustomEnd]     = useState(() => format(new Date(), "yyyy-MM-dd"));
-
+  const [granularity, setGranularity] = useState<ReportGranularity>("mes");
+  const [cursorDate, setCursorDate] = useState(() => new Date());
   const [selectedEmp, setSelectedEmp] = useState<any | null>(null);
+  const [now, setNow] = useState(() => new Date());
   const storeVersion = useStoreVersion();
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const employees = useMemo(() => employeesStore.list(false), [storeVersion]);
   const allAppts = useMemo(() => appointmentsStore.list({}), [storeVersion]);
+  const { start, end, label, shortLabel } = useMemo(
+    () => getReportRange(granularity, cursorDate),
+    [granularity, cursorDate],
+  );
+  const currentRange = getReportRange(granularity, now);
+  const isCurrentRange = format(start, "yyyy-MM-dd") === format(currentRange.start, "yyyy-MM-dd");
 
-  const { start, end, label } = getPeriodDates(period, customStart, customEnd);
-
-  // Período anterior para comparação (mesmo intervalo de dias)
+  // Período anterior para comparação, com a mesma granularidade do período atual.
   const prevDates = useMemo(() => {
-    const diff = end.getTime() - start.getTime();
-    const pStart = new Date(start.getTime() - diff - 86400000);
-    const pEnd = new Date(start.getTime() - 86400000);
-    return { start: pStart, end: pEnd };
-  }, [start, end]);
+    if (granularity === "dia") {
+      const previous = addDays(start, -1);
+      return { start: startOfDay(previous), end: endOfDay(previous) };
+    }
+    if (granularity === "semana") {
+      return { start: subWeeks(start, 1), end: subWeeks(end, 1) };
+    }
+    const previous = subMonths(start, 1);
+    return { start: startOfMonth(previous), end: endOfMonth(previous) };
+  }, [granularity, start, end]);
 
-  // Filtrar apenas agendamentos até o momento presente (sem projeções futuras)
-  const now = new Date();
-  const appts = useMemo(() => getAppointmentsInPeriod(start, end).filter(a => {
+  // Realizado exclui o futuro; a projeção é calculada em separado no mesmo intervalo.
+  const apptsInRange = useMemo(
+    () => getAppointmentsInPeriod(start, end),
+    [start, end, storeVersion],
+  );
+  const appts = useMemo(() => apptsInRange.filter(a => {
     try { return parseISO(a.startTime) <= now; } catch { return false; }
-  }), [start, end, storeVersion]);
+  }), [apptsInRange, now]);
+  const futureAppts = useMemo(() => apptsInRange.filter(a => {
+    try { return parseISO(a.startTime) > now && isFinancialAppointment(a); } catch { return false; }
+  }), [apptsInRange, now]);
 
   const prevAppts = useMemo(() => getAppointmentsInPeriod(prevDates.start, prevDates.end).filter(a => {
     try { return parseISO(a.startTime) <= now; } catch { return false; }
-  }), [prevDates, storeVersion]);
+  }), [prevDates, storeVersion, now]);
 
   const stats = useMemo(() => calcPeriodStats(appts, employees), [appts, employees]);
   const prevStats = useMemo(() => calcPeriodStats(prevAppts, employees), [prevAppts, employees]);
+  const futureStats = useMemo(() => calcPeriodStats(futureAppts, employees), [futureAppts, employees]);
 
-  const byDay    = useMemo(() => calcRevenueByDay(appts, Math.min(30, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1)), [appts, start, end]);
+  const byDay = useMemo(() => {
+    const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
+    return Array.from({ length: Math.min(days, 31) }, (_, index) => {
+      const date = addDays(start, index);
+      const key = format(date, "yyyy-MM-dd");
+      const dayAppts = appts.filter(a => {
+        try { return format(parseISO(a.startTime), "yyyy-MM-dd") === key; } catch { return false; }
+      });
+      return {
+        date: key,
+        label: format(date, "dd/MM"),
+        revenue: dayAppts.reduce((sum, a) => sum + toNum(a.totalPrice), 0),
+        count: dayAppts.length,
+      };
+    });
+  }, [appts, start, end]);
   const byEmp    = useMemo(() => calcRevenueByEmployee(appts, employees), [appts, employees]);
   const services = useMemo(() => calcPopularServices(appts), [appts]);
 
@@ -176,67 +204,134 @@ export default function RelatoriosPage() {
     { label: "Comissões", value: fmt(stats.totalCommissions), icon: Percent, color: "#8b5cf6", growth: null },
     { label: "Custo Material", value: fmt(stats.totalMaterial), icon: Scissors, color: "#06b6d4", growth: null },
     { label: "Cancelamentos", value: `${stats.cancelRate.toFixed(1)}%`, icon: Users, color: "#ef4444", growth: growth.cancelRate, inverse: true },
-    { label: "Agend. Futuros", value: fmt(stats.scheduledRevenue), icon: Calendar, color: "#f97316", growth: null },
   ];
 
   return (
     <div className="p-4 md:p-6 space-y-8">
-      {/* Header + período */}
-      <div className="space-y-3">
-        <div>
-          <h2 className="text-xl font-bold">Relatórios</h2>
-          <p className="text-sm text-muted-foreground">Fonte: agendamentos · {label}</p>
+      {/* Cabeçalho + navegação temporal */}
+      <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-pink-500/[0.14] via-card/80 to-violet-500/[0.08] p-4 md:p-5 shadow-xl shadow-black/10">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-pink-500/15 text-pink-300">
+              <CalendarDays className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-pink-300/80">Visão gerencial</p>
+              <h2 className="mt-1 text-2xl font-bold tracking-tight">Relatórios</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Agenda como fonte de verdade · {shortLabel}</p>
+            </div>
+          </div>
+
+          <div className="flex rounded-xl border border-white/10 bg-black/10 p-1">
+            {(["dia", "semana", "mes"] as ReportGranularity[]).map(option => (
+              <Button
+                key={option}
+                size="sm"
+                variant={granularity === option ? "default" : "ghost"}
+                onClick={() => setGranularity(option)}
+                className="h-8 min-w-20 text-xs capitalize"
+              >
+                {option === "mes" ? "Mês" : option === "semana" ? "Semana" : "Dia"}
+              </Button>
+            ))}
+          </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {PERIODS.map(p => (
-            <Button key={p.key} size="sm" variant={period === p.key ? "default" : "outline"}
-              onClick={() => setPeriod(p.key)} className="h-7 text-xs">
-              {p.label}
+
+        <div className="mt-5 flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/10 px-2 py-2">
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={`Período anterior: ${shortLabel}`}
+            onClick={() => setCursorDate(date => shiftReportPeriod(date, granularity, -1))}
+            className="h-10 w-10 shrink-0 rounded-lg"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </Button>
+          <div className="min-w-0 text-center">
+            <p className="truncate text-base font-semibold md:text-lg">{label}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {futureStats.scheduledCount > 0
+                ? `${futureStats.scheduledCount} agendamento(s) futuro(s) · ${fmt(futureStats.scheduledRevenue)}`
+                : "Nenhum agendamento futuro neste período"}
+            </p>
+          </div>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label={`Próximo período: ${shortLabel}`}
+            onClick={() => setCursorDate(date => shiftReportPeriod(date, granularity, 1))}
+            className="h-10 w-10 shrink-0 rounded-lg"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </Button>
+        </div>
+
+        {!isCurrentRange && (
+          <div className="mt-3 flex justify-center">
+            <Button size="sm" variant="outline" onClick={() => setCursorDate(new Date())} className="h-8 text-xs">
+              Voltar para hoje
             </Button>
-          ))}
-        </div>
-        {period === "custom" && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">De:</Label>
-              <Input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="w-36 h-8 text-sm" />
-            </div>
-            <div className="flex items-center gap-2">
-              <Label className="text-xs">Até:</Label>
-              <Input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="w-36 h-8 text-sm" />
-            </div>
           </div>
         )}
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {kpis.map(({ label, value, icon: Icon, color, growth, inverse }) => (
-          <Card key={label} className="border-border bg-card/50">
-            <CardContent className="pt-4 pb-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: `${color}20` }}>
-                  <Icon className="w-4 h-4" style={{ color }} />
-                </div>
-                {growth !== null && (
-                  <div className={cn(
-                    "flex items-center gap-0.5 text-[10px] font-bold",
-                    inverse 
-                      ? (growth > 0 ? "text-red-400" : "text-emerald-400")
-                      : (growth > 0 ? "text-emerald-400" : "text-red-400")
-                  )}>
-                    {growth > 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                    {Math.abs(growth).toFixed(1)}%
+      {/* KPIs realizados */}
+      <section className="space-y-3">
+        <div className="flex items-end justify-between gap-3 px-1">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-pink-300/80">Desempenho</p>
+            <h3 className="mt-1 text-lg font-bold">Realizado no período</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">{stats.count} atendimento(s) contabilizado(s)</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {kpis.map(({ label, value, icon: Icon, color, growth, inverse }) => (
+            <Card key={label} className="border-border bg-card/50 transition-colors hover:border-pink-400/30">
+              <CardContent className="pt-4 pb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center"
+                    style={{ background: `${color}20` }}>
+                    <Icon className="w-4 h-4" style={{ color }} />
                   </div>
-                )}
-              </div>
-              <p className="text-lg font-bold" style={{ color }}>{value}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                  {growth !== null && (
+                    <div className={cn(
+                      "flex items-center gap-0.5 text-[10px] font-bold",
+                      inverse
+                        ? (growth > 0 ? "text-red-400" : "text-emerald-400")
+                        : (growth > 0 ? "text-emerald-400" : "text-red-400")
+                    )}>
+                      {growth > 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                      {Math.abs(growth).toFixed(1)}%
+                    </div>
+                  )}
+                </div>
+                <p className="text-lg font-bold" style={{ color }}>{value}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {/* Projeção futura separada do realizado */}
+      <section className="rounded-2xl border border-orange-400/20 bg-orange-500/[0.08] p-4 md:p-5">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-400/15 text-orange-300">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-orange-300/80">Agenda futura</p>
+              <h3 className="mt-1 text-lg font-bold">Agenda futura no período</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Agendamentos válidos na Agenda, ainda não iniciados.</p>
+            </div>
+          </div>
+          <div className="md:text-right">
+            <p className="text-2xl font-bold text-orange-300">{fmt(futureStats.scheduledRevenue)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{futureStats.scheduledCount} agendamento(s) futuro(s)</p>
+          </div>
+        </div>
+      </section>
 
       {/* --- NOVA SEÇÃO: VISÃO HISTÓRICA FINANCEIRA --- */}
       <div className="space-y-6 pt-4 border-t border-border/50">
