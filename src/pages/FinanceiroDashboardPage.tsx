@@ -19,7 +19,7 @@ import {
   AlertCircle, AlertTriangle, CheckCircle, Info, ChevronRight,
   Calendar, Clock, Award,
 } from "lucide-react";
-import { appointmentsStore } from "@/features/agenda";
+import { appointmentsStore, fetchAllData, retryFetchAllData } from "@/features/agenda";
 import { employeesStore } from "@/features/funcionarios";
 import { expensesStore } from "@/features/financeiro";
 import { clientsStore } from "@/features/clientes";
@@ -27,9 +27,11 @@ import {
   calcPeriodStats, calcRevenueByDay, calcRevenueByEmployee,
   calcTopClients, calcConversionRate, calcMostProfitableServices,
   calcWeeklyRevenue, calcInactiveClients, getPeriodDates,
-  getAppointmentsInPeriod, toNum,
+  getAppointmentsInPeriod, toNum, isFinancialAppointment, calcCommission,
 } from "@/features/relatorios";
 import { Button } from "@/components/ui/button";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
+import { localDateKey } from "@/lib/agentSchedule";
 
 function getAccent() {
   try { return JSON.parse(localStorage.getItem("salon_config") || "{}").accentColor || "#ec4899"; }
@@ -57,8 +59,7 @@ function getPeriodRange(key: PeriodKey) {
   return getPeriodDates(key as any);
 }
 
-function getFutureRange(period: FuturePeriod) {
-  const now = new Date();
+function getFutureRange(period: FuturePeriod, now = new Date()) {
   switch (period) {
     case "semana":    return { start: now, end: endOfWeek(now, { weekStartsOn: 1 }), label: "Esta semana" };
     case "mes":       return { start: now, end: endOfMonth(now), label: "Este mês" };
@@ -88,55 +89,64 @@ export default function FinanceiroDashboardPage() {
   const [futurePeriod, setFuturePeriod]     = useState<FuturePeriod>("semana");
   const [showInactive, setShowInactive]     = useState(false);
   const [dataVersion, setDataVersion]       = useState(0);
+  const [retryVersion, setRetryVersion]     = useState(0);
+  const [loading, setLoading]               = useState(true);
+  const [failedSources, setFailedSources]   = useState<string[]>([]);
+  const [clockVersion, setClockVersion]     = useState(0);
+  const storeVersion = useStoreVersion();
 
-  useEffect(() => {
-    const refresh = () => setDataVersion(version => version + 1);
-    window.addEventListener("store_updated", refresh);
-    window.addEventListener("appointments_updated", refresh);
-    window.addEventListener("expenses_updated", refresh);
-    return () => {
-      window.removeEventListener("store_updated", refresh);
-      window.removeEventListener("appointments_updated", refresh);
-      window.removeEventListener("expenses_updated", refresh);
-    };
-  }, []);
-
-  // O carregamento global pode terminar antes ou depois de a página montar.
-  // Busca as despesas explicitamente para evitar que o lucro fique preso ao
-  // cache vazio do primeiro render em dispositivos móveis.
   useEffect(() => {
     let mounted = true;
-    expensesStore.fetchAll()
-      .then(() => {
-        if (mounted) setDataVersion(version => version + 1);
-      })
-      .catch(error => {
-        console.warn("[Financeiro] Não foi possível atualizar despesas:", error);
-      });
+    setLoading(true);
+    setFailedSources([]);
+
+    const load = retryVersion > 0 ? retryFetchAllData() : fetchAllData();
+    load.then(result => {
+      if (!mounted) return;
+      setFailedSources(result.failed);
+      setDataVersion(version => version + 1);
+      setLoading(false);
+    }).catch(error => {
+      if (!mounted) return;
+      console.warn("[Financeiro] Não foi possível carregar a Agenda:", error);
+      setFailedSources(["bootstrap"]);
+      setLoading(false);
+    });
+
     return () => { mounted = false; };
+  }, [retryVersion]);
+
+  // Atualiza períodos e projeções quando o app permanece aberto durante a
+  // passagem do tempo, sem fazer novas alterações no Supabase.
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockVersion(version => version + 1), 60_000);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const allAppts    = useMemo(() => appointmentsStore.list({}), [dataVersion]);
-  const employees   = useMemo(() => employeesStore.list(true), [dataVersion]);
-  const allExpenses = useMemo(() => expensesStore.list(), [dataVersion]);
+  const allAppts    = useMemo(() => appointmentsStore.list({}), [dataVersion, storeVersion]);
+  const employees   = useMemo(() => employeesStore.list(true), [dataVersion, storeVersion]);
+  const allExpenses = useMemo(() => expensesStore.list(), [dataVersion, storeVersion]);
 
-  const now      = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
+  const now      = useMemo(() => new Date(), [clockVersion]);
+  const todayStr = localDateKey(now) ?? "";
+  const dataLoading = loading && allAppts.length === 0;
+  const agendaUnavailable = !loading &&
+    (failedSources.includes("agendamentos") || failedSources.includes("bootstrap")) &&
+    allAppts.length === 0;
 
   // ── Ranges ───────────────────────────────────────────────
   const { start: pStart, end: pEnd, label: pLabel } = useMemo(
     () => getPeriodRange(selectedPeriod),
-    [selectedPeriod]
+    [selectedPeriod, clockVersion]
   );
   const periodEnd = pEnd < now ? pEnd : now; // para períodos passados usar pEnd, actuais usar now
 
-  const { start: fStart, end: fEnd, label: fLabel } = useMemo(
-    () => getFutureRange(futurePeriod),
-    [futurePeriod]
+  const { end: fEnd, label: fLabel } = useMemo(
+    () => getFutureRange(futurePeriod, now),
+    [futurePeriod, clockVersion]
   );
 
-  const isActive = (a: any) =>
-    !["cancelled", "no_show"].includes(a.status) && toNum(a.totalPrice) > 0.01;
+  const isActive = (a: any) => isFinancialAppointment(a);
 
   // ── KPIs dos 6 períodos simultâneos ──────────────────────
   const multiPeriodStats = useMemo(() => {
@@ -146,7 +156,7 @@ export default function FinanceiroDashboardPage() {
       const appts = allAppts.filter(a => {
         try {
           const d = parseISO(a.startTime);
-          return d >= start && d <= cutoff && toNum(a.totalPrice) > 0;
+          return d >= start && d <= cutoff && isFinancialAppointment(a);
         } catch { return false; }
       });
       const revenue   = appts.reduce((s, a) => s + toNum(a.totalPrice), 0);
@@ -154,14 +164,14 @@ export default function FinanceiroDashboardPage() {
       const avgTicket = count > 0 ? revenue / count : 0;
       return { period: value, label, revenue, count, avgTicket };
     });
-  }, [allAppts]);
+  }, [allAppts, now]);
 
   // ── Realizado no período seleccionado ────────────────────
   const periodAppts = useMemo(
     () => allAppts.filter(a => {
       try {
         const d = parseISO(a.startTime);
-        return d >= pStart && d <= periodEnd && toNum(a.totalPrice) > 0;
+        return d >= pStart && d <= periodEnd && isFinancialAppointment(a);
       } catch { return false; }
     }),
     [pStart, periodEnd, allAppts]
@@ -173,8 +183,8 @@ export default function FinanceiroDashboardPage() {
   );
 
   const periodExpenses = useMemo(() => {
-    const s = pStart.toISOString().slice(0, 10);
-    const e = periodEnd.toISOString().slice(0, 10);
+    const s = localDateKey(pStart) ?? "";
+    const e = localDateKey(periodEnd) ?? "";
     return allExpenses.filter(ex => ex.date >= s && ex.date <= e && ex.status === "paga");
   }, [allExpenses, pStart, periodEnd]);
 
@@ -186,13 +196,13 @@ export default function FinanceiroDashboardPage() {
   const futureAppts = useMemo(() =>
     allAppts.filter(a =>
       isActive(a) && parseISO(a.startTime) > now && parseISO(a.startTime) <= fEnd
-    ), [allAppts, fEnd]
+    ), [allAppts, fEnd, now]
   );
 
   const futRevenue     = futureAppts.reduce((s, a) => s + toNum(a.totalPrice), 0);
   const futCommissions = futureAppts.reduce((s, a) => {
-    const emp = employees.find(e => e.id === a.employeeId);
-    return s + (emp ? toNum(a.totalPrice) * (emp.commissionPercent / 100) : 0);
+      const emp = employees.find(e => e.id === a.employeeId);
+    return s + (emp ? calcCommission(a, emp) : 0);
   }, 0);
   const futNet = futRevenue - futCommissions;
 
@@ -209,7 +219,7 @@ export default function FinanceiroDashboardPage() {
         count:   dayAppts.length,
       };
     }).filter(d => d.revenue > 0);
-  }, [futureAppts, fEnd]);
+  }, [futureAppts, fEnd, now]);
   const maxFutDay = Math.max(...futureDays.map(d => d.revenue), 1);
 
   // Ranking por funcionário — projeção
@@ -217,7 +227,7 @@ export default function FinanceiroDashboardPage() {
     employees.map(emp => {
       const appts   = futureAppts.filter(a => a.employeeId === emp.id);
       const revenue = appts.reduce((s, a) => s + toNum(a.totalPrice), 0);
-      return { emp, revenue, commission: revenue * (emp.commissionPercent / 100), count: appts.length };
+      return { emp, revenue, commission: appts.reduce((sum, a) => sum + calcCommission(a, emp), 0), count: appts.length };
     }).filter(e => e.revenue > 0).sort((a, b) => b.revenue - a.revenue),
     [employees, futureAppts]
   );
@@ -225,11 +235,11 @@ export default function FinanceiroDashboardPage() {
   // ── Gráficos históricos ───────────────────────────────────
   const pastAppts = useMemo(() =>
     allAppts.filter(a => {
-      try { return parseISO(a.startTime) <= now && toNum(a.totalPrice) > 0; }
+      try { return parseISO(a.startTime) <= now && isFinancialAppointment(a); }
       catch { return false; }
-    }), [allAppts]);
+    }), [allAppts, now]);
 
-  const revenueByDay   = useMemo(() => calcRevenueByDay(pastAppts, 30), [pastAppts]);
+  const revenueByDay   = useMemo(() => calcRevenueByDay(pastAppts, 30), [pastAppts, now]);
   const revenueByEmp   = useMemo(() => calcRevenueByEmployee(periodAppts, employees), [periodAppts, employees]);
   const topClients     = useMemo(() => calcTopClients(periodAppts, 10), [periodAppts]);
   const profitServices = useMemo(() => calcMostProfitableServices(pastAppts).slice(0, 8), [pastAppts]);
@@ -239,9 +249,9 @@ export default function FinanceiroDashboardPage() {
   const inactiveClients= useMemo(() => {
     const activeIds = new Set(clientsStore.list().map(c => c.id));
     return calcInactiveClients(allAppts, 90, activeIds);
-  }, [allAppts]);
-  const overdueExpenses= useMemo(() => allExpenses.filter(e => e.status === "pendente" && e.date < todayStr), [allExpenses]);
-  const weeklyData     = useMemo(() => calcWeeklyRevenue(allAppts, 5), [allAppts]);
+  }, [allAppts, now]);
+  const overdueExpenses= useMemo(() => allExpenses.filter(e => e.status === "pendente" && e.date < todayStr), [allExpenses, todayStr]);
+  const weeklyData     = useMemo(() => calcWeeklyRevenue(pastAppts, 5, now), [pastAppts, now]);
   const thisWeekRev    = weeklyData[weeklyData.length - 1]?.revenue ?? 0;
   const prevAvg        = weeklyData.slice(0, 4).reduce((s, w) => s + w.revenue, 0) / 4;
   const weekVsPrev     = prevAvg > 0 ? ((thisWeekRev - prevAvg) / prevAvg) * 100 : 0;
@@ -261,6 +271,41 @@ export default function FinanceiroDashboardPage() {
     padding: 20,
   };
 
+  if (dataLoading) {
+    return (
+      <div className="p-4 md:p-6 space-y-6">
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <TrendingUp className="w-5 h-5" style={{ color: accent }} />
+            Painel Financeiro
+          </h2>
+          <p className="text-sm text-muted-foreground">Carregando os dados da Agenda…</p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6 text-sm text-muted-foreground animate-pulse">
+          Sincronizando faturamento, projeções e comissões…
+        </div>
+      </div>
+    );
+  }
+
+  if (agendaUnavailable) {
+    return (
+      <div className="p-4 md:p-6 space-y-6">
+        <div>
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <TrendingUp className="w-5 h-5" style={{ color: accent }} />
+            Painel Financeiro
+          </h2>
+          <p className="text-sm text-muted-foreground">A Agenda é a fonte de verdade do Financeiro.</p>
+        </div>
+        <div className="rounded-2xl border border-red-400/20 bg-red-400/[0.08] p-5 space-y-3">
+          <p className="text-sm text-red-300">Não foi possível carregar os agendamentos. Os indicadores não serão apresentados como zero.</p>
+          <Button size="sm" onClick={() => setRetryVersion(version => version + 1)}>Tentar novamente</Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-6">
       {/* Header */}
@@ -269,8 +314,23 @@ export default function FinanceiroDashboardPage() {
           <TrendingUp className="w-5 h-5" style={{ color: accent }} />
           Painel Financeiro
         </h2>
-        <p className="text-sm text-muted-foreground">Baseado nos agendamentos concluídos</p>
-      </div>
+          <p className="text-sm text-muted-foreground">Baseado nos agendamentos da Agenda</p>
+        </div>
+        {loading && allAppts.length > 0 && (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-muted-foreground">
+            Atualizando os dados da Agenda…
+          </div>
+        )}
+        {failedSources.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.08] px-4 py-3">
+            <p className="text-sm text-amber-300">
+              Algumas fontes não foram atualizadas: {failedSources.join(", ")}.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setRetryVersion(version => version + 1)}>
+              Tentar novamente
+            </Button>
+          </div>
+        )}
 
       {/* ── Alertas proativos ── */}
       <div className="space-y-2">
@@ -354,15 +414,15 @@ export default function FinanceiroDashboardPage() {
 
       {/* ── Breakdown financeiro do período ── */}
       <div style={cardStyle}>
-        <p className="text-sm font-semibold mb-4">
-          Lucro real — {pLabel}
+          <p className="text-sm font-semibold mb-4">
+          Resultado após custos cadastrados — {pLabel}
         </p>
         <div className="space-y-2">
           {[
             { label: "Faturamento bruto",    value:  pStats.totalRevenue,      color: "text-foreground" },
             { label: "- Custo de materiais", value: -pStats.totalMaterial,     color: "text-yellow-400" },
             { label: "- Comissões",          value: -pStats.totalCommissions,  color: "text-orange-400" },
-            { label: "- Despesas pagas",     value: -totalExpenses,            color: "text-red-400"    },
+            { label: "- Despesas pagas cadastradas", value: -totalExpenses, color: "text-red-400" },
           ].map(({ label, value, color }) => (
             <div key={label} className="flex items-center justify-between py-1.5 border-b border-white/5">
               <span className="text-sm text-muted-foreground">{label}</span>
@@ -372,7 +432,7 @@ export default function FinanceiroDashboardPage() {
             </div>
           ))}
           <div className="flex items-center justify-between pt-3">
-            <span className="font-bold">= Lucro real</span>
+            <span className="font-bold">= Resultado líquido</span>
             <span className={`text-xl font-bold ${lucroReal >= 0 ? "text-green-400" : "text-red-400"}`}>{fmt(lucroReal)}</span>
           </div>
           <div className="flex items-center justify-between">
@@ -380,7 +440,7 @@ export default function FinanceiroDashboardPage() {
             <span className={`text-sm font-medium ${margem >= 0 ? "text-green-400" : "text-red-400"}`}>{margem.toFixed(1)}%</span>
           </div>
           <div className="mt-2 flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">Despesas do período</p>
+            <p className="text-xs text-muted-foreground">Custos cadastrados no período</p>
             <button className="text-xs underline" style={{ color: accent }} onClick={() => setLocation("/despesas")}>Gerenciar →</button>
           </div>
           {totalExpenses === 0 && (
@@ -388,7 +448,7 @@ export default function FinanceiroDashboardPage() {
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <p className="text-xs text-muted-foreground">
-                Sem despesas pagas neste período.{" "}
+                Nenhuma despesa paga cadastrada neste período.{" "}
                 <button className="underline" style={{ color: accent }} onClick={() => setLocation("/despesas")}>Cadastrar →</button>
               </p>
             </div>
@@ -589,8 +649,10 @@ export default function FinanceiroDashboardPage() {
       <div className="flex items-center gap-2 p-3 rounded-lg"
         style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.12)" }}>
         <Info className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-        <p className="text-xs text-amber-400/80">
-          Taxa de conversão histórica: <strong>{(convRate * 100).toFixed(0)}%</strong> dos últimos 90 dias
+          <p className="text-xs text-amber-400/80">
+          Taxa de conversão histórica: {convRate == null
+            ? <strong>sem dados suficientes</strong>
+            : <><strong>{(convRate * 100).toFixed(0)}%</strong> dos últimos 90 dias</>}
         </p>
       </div>
     </div>

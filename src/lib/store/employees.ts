@@ -38,6 +38,7 @@ export const employeesStore = {
 
     const emp = toEmployee(row);
     cache.employees.push(emp);
+    window.dispatchEvent(new Event("store_updated"));
 
     await addAuditLog("employee", emp.id, "create", `Funcionário "${emp.name}" criado`);
 
@@ -70,6 +71,7 @@ export const employeesStore = {
     const idx = cache.employees.findIndex(e => e.id === id);
 
     if (idx !== -1) cache.employees[idx] = emp;
+    window.dispatchEvent(new Event("store_updated"));
 
     await addAuditLog("employee", id, "update", `Funcionário "${emp.name}" atualizado`);
 
@@ -82,6 +84,7 @@ export const employeesStore = {
     await supabase.from("employees").delete().eq("id", id);
 
     cache.employees = cache.employees.filter(e => e.id !== id);
+    window.dispatchEvent(new Event("store_updated"));
 
     if (emp) {
       await addAuditLog("employee", id, "delete", `Funcionário "${emp.name}" removido`);

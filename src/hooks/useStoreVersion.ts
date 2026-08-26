@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 
-const STORE_EVENTS = ["store_updated", "appointments_updated", "bootstrap_updated"] as const;
+const STORE_EVENTS = [
+  "store_updated",
+  "appointments_updated",
+  "expenses_updated",
+  "bootstrap_updated",
+] as const;
 
 /**
  * Incrementa uma versão local sempre que dados persistidos ou o bootstrap
