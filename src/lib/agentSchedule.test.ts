@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildScheduleTimes,
+  extractLocalScheduleHints,
   intervalsOverlap,
   isCancellation,
   isConfirmation,
@@ -57,5 +58,21 @@ describe("agentSchedule", () => {
     expect(isExplicitScheduleOverride("agenda mesmo assim")).toBe(true);
     expect(isExplicitScheduleOverride("pode agendar fora do horário")).toBe(true);
     expect(isExplicitScheduleOverride("sim")).toBe(false);
+  });
+
+  it("extrai os dados básicos de um pedido local de agendamento", () => {
+    const hints = extractLocalScheduleHints(
+      "Agendar Maria da Silva para corte amanhã às 14h com Ana",
+      [{ id: 1, name: "MARIA DA SILVA" }],
+      [{ id: 2, name: "Corte" }],
+      [{ id: 3, name: "ANA" }],
+    );
+    expect(hints).toEqual({
+      clientName: "MARIA DA SILVA",
+      serviceName: "Corte",
+      employeeName: "ANA",
+      date: "amanha",
+      time: "14h",
+    });
   });
 });

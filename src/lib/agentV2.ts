@@ -37,6 +37,7 @@ import {
 } from "./agentMemory";
 import {
   buildScheduleTimes,
+  extractLocalScheduleHints,
   intervalsOverlap,
   isCancellation,
   isConfirmation,
@@ -667,6 +668,8 @@ async function callLLM(
           throw new Error("Token inválido. Verifique seu GitHub PAT em: github.com/settings/tokens");
         if (res.status === 429)
           throw new Error("Limite de requisições atingido. Aguarde alguns segundos.");
+        if (res.status === 410)
+          throw new Error("O serviço GitHub Models está temporariamente indisponível (HTTP 410).");
         throw new Error(`Erro ${res.status}`);
       }
 
@@ -675,7 +678,7 @@ async function callLLM(
     } catch (err) {
       lastErr = err;
       if (err instanceof DOMException && err.name === "AbortError") break; // timeout não faz retry
-      if ((err as any)?.message?.includes("401")) break; // auth error não faz retry
+      if ((err as any)?.message?.includes("401") || (err as any)?.message?.includes("410")) break; // auth/indisponibilidade não fazem retry
     }
   }
   clearTimeout(tmr);
@@ -1044,6 +1047,78 @@ function claimsActionSuccess(text: string): boolean {
   return /\b(agendei|agendado com sucesso|marquei|cancelei|cancelado com sucesso|movi|reagendei|conclui|concluído com sucesso|agendamento realizado)\b/i.test(text);
 }
 
+function isScheduleMutationRequest(text: string): boolean {
+  return /\b(agendar|agendamento|marcar|marcado|reservar|reserva|criar horário|fazer um agendamento)\b/i.test(text)
+    && !/\b(quais|qual|listar|lista|ver|consultar|consulta|mostrar|mostre)\b/i.test(text);
+}
+
+function formatLocalActionResult(result: string): string {
+  if (result.startsWith("CONFIRMACAO:")) return result.replace("CONFIRMACAO:", "").trim();
+  if (result.startsWith("FORA_HORARIO:")) return result.replace("FORA_HORARIO:", "").trim();
+  if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
+    return `Com qual profissional deseja agendar? Disponíveis: ${result.replace("AGUARDANDO_PROFISSIONAL:", "")}`;
+  }
+  if (result.startsWith("CONFLITO:")) {
+    return `Conflito de horário: ${result.replace("CONFLITO:", "")}\nDeseja agendar mesmo assim? Responda "sim" para confirmar.`;
+  }
+  return result;
+}
+
+async function handleLocalScheduleFallback(userMessage: string): Promise<AgentV2Response> {
+  if (!isScheduleMutationRequest(userMessage)) {
+    const asksToday = /\b(agenda|agendamentos|horários|compromissos)\b/i.test(userMessage)
+      && /\bhoje\b/i.test(userMessage);
+    const text = asksToday ? getTodayData() : "O serviço de IA está temporariamente indisponível. A Agenda continua acessível pelo menu principal.";
+    return { text, messageId: `m_${Date.now()}`, userMessage };
+  }
+
+  const hints = extractLocalScheduleHints(
+    userMessage,
+    clientsStore.list().map((client) => ({ id: client.id, name: client.name })),
+    servicesStore.list(true).map((service) => ({ id: service.id, name: service.name })),
+    employeesStore.list(true).map((employee) => ({ id: employee.id, name: employee.name })),
+  );
+
+  const missing: string[] = [];
+  if (!hints.clientName) missing.push("o nome exato do cliente");
+  if (!hints.serviceName) missing.push("o serviço");
+  if (!hints.date) missing.push("a data");
+  if (!hints.time) missing.push("o horário");
+  if (missing.length > 0) {
+    return {
+      text: `Não consegui consultar o LLM agora. Para agendar, informe ${missing.join(", ")}. Exemplo: “Agendar ${hints.clientName ?? "Maria da Silva"} para corte amanhã às 14h”.`,
+      messageId: `m_${Date.now()}`,
+      userMessage,
+    };
+  }
+
+  const service = servicesStore.list(true).find((item) => item.name.toLowerCase() === hints.serviceName!.toLowerCase());
+  const employee = hints.employeeName
+    ? employeesStore.list(true).find((item) => item.name.toLowerCase() === hints.employeeName!.toLowerCase())
+    : undefined;
+  if (!service) return { text: `Não encontrei o serviço “${hints.serviceName}” entre os serviços ativos.`, messageId: `m_${Date.now()}`, userMessage };
+
+  const result = await executeAction({
+    type: "agendar",
+    params: {
+      clientName: hints.clientName,
+      serviceId: service.id,
+      employeeId: employee?.id,
+      date: hints.date,
+      time: hints.time,
+    },
+  });
+  const text = formatLocalActionResult(result);
+  const actionExecuted = result.includes("criado com sucesso");
+  return {
+    text,
+    actionExecuted,
+    navigateTo: actionExecuted ? "/agenda" : undefined,
+    messageId: `m_${Date.now()}`,
+    userMessage,
+  };
+}
+
 // ─── Configuração e API pública ───────────────────────────
 
 let cfg: AgentV2Config | null = null;
@@ -1134,7 +1209,13 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
     raw = await callLLM(buildSystemPrompt(cfg), history, msgTrimmed, systemData, cfg);
   } catch (err) {
     console.warn("[agentV2] callLLM falhou:", err);
-    const errText = `Erro: ${err instanceof Error ? err.message : "Tente novamente."}`;
+    const errorMessage = err instanceof Error ? err.message : "";
+    if (/\b410\b|temporariamente indisponível|retirement brownout/i.test(errorMessage)) {
+      const fallback = await handleLocalScheduleFallback(msgTrimmed);
+      addToHistory("assistant", fallback.text);
+      return fallback;
+    }
+    const errText = `Erro: ${errorMessage || "Tente novamente."}`;
     return { text: errText };
   }
 

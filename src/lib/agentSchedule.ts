@@ -156,3 +156,49 @@ export function isExplicitScheduleOverride(text: string): boolean {
   const value = normalizeText(text);
   return /agenda mesmo assim|agendar mesmo assim|pode agendar fora|forcar horario|forca o horario|ignora.*horario/.test(value);
 }
+
+export interface ScheduleCandidate {
+  id: number;
+  name: string;
+}
+
+export interface LocalScheduleHints {
+  date?: string;
+  time?: string;
+  clientName?: string;
+  serviceName?: string;
+  employeeName?: string;
+}
+
+function findCandidate(text: string, candidates: ScheduleCandidate[]): string | undefined {
+  const normalized = normalizeText(text);
+  return [...candidates]
+    .filter((candidate) => {
+      const name = normalizeText(candidate.name);
+      return name.length >= 3 && normalized.includes(name);
+    })
+    .sort((a, b) => normalizeText(b.name).length - normalizeText(a.name).length)[0]?.name;
+}
+
+export function extractLocalScheduleHints(
+  text: string,
+  clients: ScheduleCandidate[],
+  services: ScheduleCandidate[],
+  employees: ScheduleCandidate[],
+): LocalScheduleHints {
+  const hints: LocalScheduleHints = {};
+  const normalized = normalizeText(text);
+
+  const dateMatch = normalized.match(/\b(hoje|amanha|domingo|segunda(?:-feira)?|terca(?:-feira)?|quarta(?:-feira)?|quinta(?:-feira)?|sexta(?:-feira)?|sabado)\b/);
+  const numericDateMatch = normalized.match(/\b(?:dia|em|para|no dia|pro dia)\s*(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{4}-\d{2}-\d{2})\b/);
+  hints.date = numericDateMatch?.[1] ?? dateMatch?.[1];
+
+  const timeMatch = normalized.match(/\b(?:as|a|para as|horario|horas)\s*(\d{1,2}(?::\d{1,2}|h\d{0,2})?)\b/);
+  const standaloneTime = normalized.match(/\b(\d{1,2}(?::\d{1,2}|h\d{1,2}))\b/);
+  hints.time = timeMatch?.[1] ?? standaloneTime?.[1];
+
+  hints.clientName = findCandidate(text, clients);
+  hints.serviceName = findCandidate(text, services);
+  hints.employeeName = findCandidate(text, employees);
+  return hints;
+}
