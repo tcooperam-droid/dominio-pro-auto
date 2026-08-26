@@ -10,12 +10,15 @@ import { appointmentsStore } from "../features/agenda";
 import { employeesStore } from "../features/funcionarios";
 import type { Appointment } from "../features/agenda";
 import type { Employee } from "../features/funcionarios";
+import type { Client } from "./store/types";
 import {
   format, isWithinInterval, parseISO,
-  startOfWeek, endOfWeek, startOfMonth, endOfMonth,
-  startOfYear, endOfYear, subDays, addDays, subWeeks, subMonths, subYears, isSameMonth, isSameYear,
+  startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear,
+  subDays, addDays, subWeeks, subMonths, subYears, isSameMonth, isSameYear,
+  differenceInCalendarDays, startOfDay,
 } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { normalizeSearchText } from "./store/shared";
 
 export const toNum = (v: unknown) => parseFloat(String(v ?? 0)) || 0;
 
@@ -365,37 +368,47 @@ export function calcWeeklyRevenue(
 
 export function calcInactiveClients(
   appts: Appointment[],
-  inactiveDays = 70,
-  activeClientIds?: Set<number>,
+  inactiveDays = 90,
+  activeClients?: Client[] | Set<number>,
+  maxInactiveDays = 150,
 ): { clientId: number | null; clientName: string; lastVisit: string; daysSince: number }[] {
   const now = new Date();
-  const threshold = subDays(now, inactiveDays);
+  const activeClientList = Array.isArray(activeClients) ? activeClients : undefined;
+  const activeClientIds: Set<number> | undefined = activeClientList
+    ? new Set(activeClientList.map(client => client.id))
+    : activeClients instanceof Set
+      ? activeClients
+      : undefined;
 
-  // Filtrar agendamentos de clientes excluídos do cadastro:
-  // Se activeClientIds é fornecido e o agendamento tem clientId, o cliente
-  // deve ainda existir no cadastro (não foi deletado).
+  // A name-only historical appointment can be kept only when its normalized name
+  // matches a current client. This prevents deleted-client orphans from reappearing.
+  const nameToClientId = new Map<string, number>();
+  const clientById = new Map<number, Client>();
+  for (const client of activeClientList ?? []) {
+    clientById.set(client.id, client);
+    const key = normalizeSearchText(client.name);
+    if (key && !nameToClientId.has(key)) nameToClientId.set(key, client.id);
+  }
+
+  const normalizedName = (name: string | null | undefined) => normalizeSearchText(name ?? "");
   const validAppts = activeClientIds
-    ? appts.filter(a => !a.clientId || activeClientIds.has(a.clientId))
+    ? appts.filter(a => {
+        if (a.clientId != null) return activeClientIds.has(a.clientId);
+        return activeClientList ? nameToClientId.has(normalizedName(a.clientName)) : true;
+      })
     : appts;
 
-  // Some appointments are linked by clientId, others only by clientName (e.g. walk-ins).
-  // Build a name→clientId map so both kinds are unified under the same key.
-  const nameToClientId = new Map<string, number>();
-  validAppts.forEach(a => {
-    if (a.clientId && a.clientName) {
-      nameToClientId.set((a.clientName).toLowerCase(), a.clientId);
-    }
-  });
-
   const getKey = (a: Appointment): string => {
-    const id = a.clientId ?? nameToClientId.get((a.clientName ?? "").toLowerCase());
-    return id ? `id:${id}` : `name:${(a.clientName ?? "").toLowerCase()}`;
+    const id = a.clientId ?? nameToClientId.get(normalizedName(a.clientName));
+    return id != null ? `id:${id}` : `name:${normalizedName(a.clientName)}`;
   };
 
+  // Any future appointment that is not explicitly invalid protects the client
+  // from appearing as absent; status confirmation is not required by the app.
   const futureClientsSet = new Set(
     validAppts
-      .filter(a => ["scheduled", "confirmed"].includes(a.status) && parseISO(a.startTime) > now)
-      .map(getKey)
+      .filter(a => !EXCLUDED.includes(a.status as typeof EXCLUDED[number]) && parseISO(a.startTime) > now)
+      .map(getKey),
   );
 
   const lastVisitMap = new Map<string, { clientId: number | null; clientName: string; lastVisit: string }>();
@@ -403,23 +416,30 @@ export function calcInactiveClients(
   validAppts
     .filter(a => !EXCLUDED.includes(a.status as typeof EXCLUDED[number]) && parseISO(a.startTime) <= now)
     .forEach(a => {
-      const key      = getKey(a);
-      const date     = a.startTime.slice(0, 10);
-      const resolvedId = a.clientId ?? nameToClientId.get((a.clientName ?? "").toLowerCase()) ?? null;
+      const key = getKey(a);
+      const date = startOfDay(parseISO(a.startTime));
+      const dateKey = format(date, "yyyy-MM-dd");
+      const resolvedId = a.clientId ?? nameToClientId.get(normalizedName(a.clientName)) ?? null;
+      const currentClient = resolvedId != null ? clientById.get(resolvedId) : undefined;
       const cur      = lastVisitMap.get(key);
-      if (!cur || date > cur.lastVisit) {
-        lastVisitMap.set(key, { clientId: resolvedId, clientName: a.clientName ?? "Sem nome", lastVisit: date });
+      if (!cur || dateKey > cur.lastVisit) {
+        lastVisitMap.set(key, {
+          clientId: resolvedId,
+          clientName: currentClient?.name ?? a.clientName ?? "Sem nome",
+          lastVisit: dateKey,
+        });
       }
     });
 
   return Array.from(lastVisitMap.entries())
-    .filter(([key, v]) => {
+    .filter(([key, value]) => {
       if (futureClientsSet.has(key)) return false;
-      return parseISO(v.lastVisit) < threshold;
+      const daysSince = differenceInCalendarDays(startOfDay(now), parseISO(value.lastVisit));
+      return daysSince > inactiveDays && daysSince <= maxInactiveDays;
     })
-    .map(([, v]) => ({
-      ...v,
-      daysSince: Math.floor((now.getTime() - parseISO(v.lastVisit).getTime()) / 86400000),
+    .map(([, value]) => ({
+      ...value,
+      daysSince: differenceInCalendarDays(startOfDay(now), parseISO(value.lastVisit)),
     }))
     .sort((a, b) => b.daysSince - a.daysSince);
 }
