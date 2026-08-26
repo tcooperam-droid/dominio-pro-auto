@@ -4,6 +4,7 @@
  * Projeção:  agendamentos futuros (exceto cancelados/no_show)
  */
 import { useState, useMemo } from "react";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import {
   format, subDays, subWeeks, subMonths, subYears,
   startOfWeek, endOfWeek, startOfMonth, endOfMonth,
@@ -165,9 +166,10 @@ export default function DashboardCaixaPage() {
   const [futurePeriod, setFuturePeriod] = useState<FuturePeriod>("semana");
   const [compareMode, setCompareMode]   = useState<CompareMode>("mensal");
   const [selectedEmpId, setSelectedEmpId] = useState<number | null>(null);
+  const storeVersion = useStoreVersion();
 
-  const employees = useMemo(() => employeesStore.list(false), []);
-  const allAppts  = useMemo(() => appointmentsStore.list({}), []);
+  const employees = useMemo(() => employeesStore.list(false), [storeVersion]);
+  const allAppts  = useMemo(() => appointmentsStore.list({}), [storeVersion]);
   const now       = new Date();
 
   const { start, end, label }      = getPeriodRange(period);

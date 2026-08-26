@@ -1,14 +1,14 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import { sessionReady } from "./lib/supabase";
+import { ensureSupabaseSession } from "./lib/supabase";
 
 // Monta a interface imediatamente. A autenticação não pode bloquear o primeiro
 // render — no Android isso deixava o ecrã branco quando a rede demorava.
 createRoot(document.getElementById("root")!).render(<App />);
 
 // Inicializa a sessão em segundo plano para as operações do Supabase.
-sessionReady.catch((err) => {
+void ensureSupabaseSession().catch((err: unknown) => {
   console.warn("Supabase bootstrap error:", err);
 });
 

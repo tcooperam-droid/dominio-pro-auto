@@ -2,4 +2,4 @@
 export { appointmentsStore } from "../../lib/store/appointments";
 export { TIME_BLOCK_MARKER, isTimeBlock } from "../../lib/store/types";
 export type { Appointment, AppointmentService } from "../../lib/store/types";
-export { fetchAllData } from "../../lib/store/bootstrap";
+export { fetchAllData, retryFetchAllData } from "../../lib/store/bootstrap";

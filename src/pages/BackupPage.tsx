@@ -3,6 +3,7 @@
  * Usa Supabase via store (não localStorage).
  */
 import { useState, useRef, useEffect } from "react";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -35,6 +36,7 @@ export default function BackupPage() {
     { label: "Logs de Auditoria", count: 0 },
   ]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const storeVersion = useStoreVersion();
 
   const refreshSummary = () => {
     setSummary([
@@ -50,6 +52,10 @@ export default function BackupPage() {
   useEffect(() => {
     fetchAllData().then(refreshSummary);
   }, []);
+
+  useEffect(() => {
+    refreshSummary();
+  }, [storeVersion]);
 
   const totalRecords = summary.reduce((sum, s) => sum + s.count, 0);
 
