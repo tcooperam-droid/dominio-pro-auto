@@ -39,6 +39,7 @@ export const servicesStore = {
 
     const svc = toService(row);
     cache.services.push(svc);
+    window.dispatchEvent(new Event("services_updated"));
 
     await addAuditLog("service", svc.id, "create", `Serviço "${svc.name}" criado`);
 
@@ -71,6 +72,7 @@ export const servicesStore = {
     const idx = cache.services.findIndex(s => s.id === id);
 
     if (idx !== -1) cache.services[idx] = svc;
+    window.dispatchEvent(new Event("services_updated"));
 
     await addAuditLog("service", id, "update", `Serviço "${svc.name}" atualizado`);
 
@@ -83,6 +85,7 @@ export const servicesStore = {
     await supabase.from("services").delete().eq("id", id);
 
     cache.services = cache.services.filter(s => s.id !== id);
+    window.dispatchEvent(new Event("services_updated"));
 
     if (svc) {
       await addAuditLog("service", id, "delete", `Serviço "${svc.name}" removido`);

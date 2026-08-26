@@ -5,6 +5,7 @@ const STORE_EVENTS = [
   "appointments_updated",
   "expenses_updated",
   "clients_updated",
+  "services_updated",
   "bootstrap_updated",
 ] as const;
 
