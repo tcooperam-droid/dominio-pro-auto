@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getClientServiceRecurrence,
   getMostFrequentCurrentService,
+  isHistoricalServiceAppointment,
   refreshAppointmentService,
 } from "./serviceSuggestions";
 import type { Appointment, AppointmentService, Service } from "./store/types";
@@ -71,14 +72,21 @@ describe("sugestão de serviço por reincidência", () => {
     expect(result.map(item => [item.serviceId, item.count])).toEqual([[2, 2], [1, 2]]);
   });
 
-  it("ignora status não concluído e não sugere serviço inativo", () => {
+  it("considera scheduled passado, ignora cancelado/no-show e não usa futuro como histórico", () => {
+    const scheduledPast = appointment(4, "2026-08-04T12:00:00.000Z", 1, "scheduled");
+    const future = appointment(5, "2027-08-04T12:00:00.000Z", 1, "scheduled");
     const result = getMostFrequentCurrentService([
       appointment(1, "2026-08-01T12:00:00.000Z", 2),
       appointment(2, "2026-08-02T12:00:00.000Z", 2, "cancelled"),
       appointment(3, "2026-08-03T12:00:00.000Z", 1),
+      scheduledPast,
+      future,
     ], services);
 
+    expect(isHistoricalServiceAppointment(scheduledPast)).toBe(true);
+    expect(isHistoricalServiceAppointment(future)).toBe(false);
     expect(result?.serviceId).toBe(1);
+    expect(result?.count).toBe(2);
     expect(result?.service?.name).toBe("Corte Atualizado");
   });
 

@@ -8,18 +8,27 @@ export interface ServiceRecurrence {
   service?: Service;
 }
 
+/** Um agendamento que pode entrar no histórico de recorrência do cliente. */
+export function isHistoricalServiceAppointment(appointment: Appointment, now = new Date()): boolean {
+  return appointment.status !== "cancelled" &&
+    appointment.status !== "no_show" &&
+    new Date(appointment.startTime) <= now;
+}
+
 /**
- * Ranking de serviços usados nas visitas concluídas de um cliente.
+ * Ranking de serviços usados no histórico válido de um cliente.
  * O ID é a chave principal; o nome/preço do histórico serve apenas como fallback visual.
  */
 export function getClientServiceRecurrence(
   appointments: Appointment[],
   services: Service[],
+  now = new Date(),
 ): ServiceRecurrence[] {
   const recurrence = new Map<number, ServiceRecurrence>();
 
   for (const appointment of appointments) {
-    if (appointment.status !== "completed") continue;
+    // A Agenda é a fonte de verdade: scheduled também vale. O futuro não é histórico.
+    if (!isHistoricalServiceAppointment(appointment, now)) continue;
 
     for (const snapshot of appointment.services ?? []) {
       if (!Number.isFinite(snapshot.serviceId) || snapshot.serviceId <= 0) continue;
@@ -55,8 +64,9 @@ export function getClientServiceRecurrence(
 export function getMostFrequentCurrentService(
   appointments: Appointment[],
   services: Service[],
+  now = new Date(),
 ): ServiceRecurrence | null {
-  return getClientServiceRecurrence(appointments, services)
+  return getClientServiceRecurrence(appointments, services, now)
     .find(item => item.service?.active) ?? null;
 }
 

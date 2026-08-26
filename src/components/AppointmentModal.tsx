@@ -33,6 +33,7 @@ import { clientsStore } from "@/features/clientes";
 import {
   getClientServiceRecurrence,
   getMostFrequentCurrentService,
+  isHistoricalServiceAppointment,
   refreshAppointmentService,
   toCurrentAppointmentService,
 } from "@/lib/serviceSuggestions";
@@ -279,7 +280,7 @@ export default function AppointmentModal({
       .filter(a => {
         const isSameId = client.id && a.clientId === client.id;
         const isSameName = client.name && a.clientName?.toLowerCase().trim() === client.name.toLowerCase().trim();
-        return (isSameId || isSameName) && a.status === "completed";
+        return (isSameId || isSameName) && isHistoricalServiceAppointment(a);
       })
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
     const suggestion = getMostFrequentCurrentService(clientAppts, servicesData);
@@ -492,12 +493,12 @@ export default function AppointmentModal({
                     </div>
                     {/* Card de histórico do cliente */}
                     {(() => {
-                      // Filtrar agendamentos do cliente (por ID ou por nome para garantir compatibilidade)
+                      // Histórico da Agenda: scheduled passado também vale; futuro/cancelado/no-show não.
                       const clientAppts = allAppointments
                         .filter(a => {
                           const isSameId = clientId && a.clientId === clientId;
                           const isSameName = clientName && a.clientName?.toLowerCase().trim() === clientName.toLowerCase().trim();
-                          return (isSameId || isSameName) && a.status === "completed";
+                          return (isSameId || isSameName) && isHistoricalServiceAppointment(a);
                         })
                         .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
                       
