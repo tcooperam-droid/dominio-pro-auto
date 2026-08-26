@@ -6,7 +6,7 @@ export {
   commissionClosingsStore,
 } from "../../lib/store/cash";
 export { auditStore } from "../../lib/store/audit";
-export { autoOpenCashIfNeeded, fetchAllData, fetchDashboardData } from "../../lib/store/bootstrap";
+export { autoOpenCashIfNeeded, fetchAllData, retryFetchAllData, fetchDashboardData } from "../../lib/store/bootstrap";
 export { calcCommission } from "../../lib/store/commission";
 export type {
   CashSession,

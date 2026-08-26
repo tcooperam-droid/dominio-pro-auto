@@ -2,7 +2,8 @@
  * ComissoesPage — Fechamento e controle de comissões por funcionário.
  * Cálculos derivam 100% dos agendamentos concluídos.
  */
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import { format, parseISO, startOfWeek, endOfWeek, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
@@ -66,10 +67,11 @@ export default function ComissoesPage() {
   const [closingNotes, setClosingNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [expandHistory, setExpandHistory] = useState(false);
+  const storeVersion = useStoreVersion();
 
-  const employees = useMemo(() => employeesStore.list(true), [refreshKey]);
-  const allAppts  = useMemo(() => appointmentsStore.list({}), [refreshKey]);
-  const closings  = useMemo(() => commissionClosingsStore.list(), [refreshKey]);
+  const employees = useMemo(() => employeesStore.list(true), [refreshKey, storeVersion]);
+  const allAppts  = useMemo(() => appointmentsStore.list({}), [refreshKey, storeVersion]);
+  const closings  = useMemo(() => commissionClosingsStore.list(), [refreshKey, storeVersion]);
 
   const { start, end } = useMemo(() => getPeriodRange(
     period,

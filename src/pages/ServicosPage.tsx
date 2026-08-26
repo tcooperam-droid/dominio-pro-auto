@@ -2,6 +2,7 @@
  * ServicosPage — CRUD de serviços do salão.
  */
 import { useState, useMemo } from "react";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,8 +36,9 @@ export default function ServicosPage() {
   const [form, setForm] = useState<ServiceForm>(defaultForm());
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const storeVersion = useStoreVersion();
 
-  const services = useMemo(() => servicesStore.list(false), [refreshKey]);
+  const services = useMemo(() => servicesStore.list(false), [refreshKey, storeVersion]);
 
   const openCreate = () => { setEditingId(null); setForm(defaultForm()); setModalOpen(true); };
 

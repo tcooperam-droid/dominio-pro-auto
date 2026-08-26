@@ -19,12 +19,25 @@ const supabaseKey = configuredKey ?? "preview-anon-key";
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Garante sessão anônima antes de qualquer query quando o Supabase está configurado.
-// Sem configuração, a interface continua navegável apenas para prévia local.
-export const sessionReady: Promise<void> = hasSupabaseConfig
-  ? (async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        await supabase.auth.signInAnonymously();
-      }
-    })()
-  : Promise.resolve();
+// A Promise é compartilhada durante o bootstrap e reiniciada se houver falha,
+// permitindo uma nova tentativa sem exigir reload do navegador.
+let sessionPromise: Promise<void> | null = null;
+
+export function ensureSupabaseSession(): Promise<void> {
+  if (!hasSupabaseConfig) return Promise.resolve();
+  if (sessionPromise) return sessionPromise;
+
+  sessionPromise = (async () => {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    if (!session) {
+      const { error } = await supabase.auth.signInAnonymously();
+      if (error) throw error;
+    }
+  })().catch((error) => {
+    sessionPromise = null;
+    throw error;
+  });
+
+  return sessionPromise;
+}

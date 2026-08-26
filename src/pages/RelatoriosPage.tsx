@@ -3,6 +3,7 @@
  * Fonte de verdade: agendamentos (independente de status).
  */
 import { useState, useMemo } from "react";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import { 
   format, subDays, parseISO, startOfMonth, endOfMonth, 
   subMonths, subYears, startOfYear, isWithinInterval 
@@ -64,8 +65,9 @@ export default function RelatoriosPage() {
   const [customEnd, setCustomEnd]     = useState(() => format(new Date(), "yyyy-MM-dd"));
 
   const [selectedEmp, setSelectedEmp] = useState<any | null>(null);
-  const employees = useMemo(() => employeesStore.list(false), []);
-  const allAppts = useMemo(() => appointmentsStore.list({}), []);
+  const storeVersion = useStoreVersion();
+  const employees = useMemo(() => employeesStore.list(false), [storeVersion]);
+  const allAppts = useMemo(() => appointmentsStore.list({}), [storeVersion]);
 
   const { start, end, label } = getPeriodDates(period, customStart, customEnd);
 
@@ -81,11 +83,11 @@ export default function RelatoriosPage() {
   const now = new Date();
   const appts = useMemo(() => getAppointmentsInPeriod(start, end).filter(a => {
     try { return parseISO(a.startTime) <= now; } catch { return false; }
-  }), [start, end]);
+  }), [start, end, storeVersion]);
 
   const prevAppts = useMemo(() => getAppointmentsInPeriod(prevDates.start, prevDates.end).filter(a => {
     try { return parseISO(a.startTime) <= now; } catch { return false; }
-  }), [prevDates]);
+  }), [prevDates, storeVersion]);
 
   const stats = useMemo(() => calcPeriodStats(appts, employees), [appts, employees]);
   const prevStats = useMemo(() => calcPeriodStats(prevAppts, employees), [prevAppts, employees]);

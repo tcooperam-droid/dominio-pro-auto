@@ -3,6 +3,7 @@
  * Design: Glass Dashboard — tema escuro, accent rosa, backdrop-blur.
  */
 import { useState, useMemo, useRef, useCallback } from "react";
+import { useStoreVersion } from "@/hooks/useStoreVersion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -181,8 +182,9 @@ export default function FerramentasClientesPage() {
   const [mergeDetailGroup, setMergeDetailGroup] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vcfInputRef  = useRef<HTMLInputElement>(null);
+  const storeVersion = useStoreVersion();
 
-  const clients = useMemo(() => clientsStore.list(), [refreshKey]);
+  const clients = useMemo(() => clientsStore.list(), [refreshKey, storeVersion]);
   const duplicateGroups = useMemo(() => findDuplicateGroups(clients), [clients]);
   const duplicateGroupsArray = useMemo(() => Array.from(duplicateGroups.entries()), [duplicateGroups]);
 
