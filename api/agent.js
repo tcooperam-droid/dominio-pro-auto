@@ -11,7 +11,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const token = process.env.GITHUB_MODELS_TOKEN || process.env.GITHUB_TOKEN;
+  // `NEXT_PUBLIC_GITHUB_TOKEN` é mantido apenas como fallback de migração
+  // para o projeto Vercel legado; o frontend nunca lê essa variável.
+  const token =
+    process.env.GITHUB_MODELS_TOKEN ||
+    process.env.GITHUB_TOKEN ||
+    process.env.NEXT_PUBLIC_GITHUB_TOKEN;
   if (!token) {
     return res.status(500).json({
       error: "GITHUB_MODELS_TOKEN não configurado no ambiente do servidor.",
