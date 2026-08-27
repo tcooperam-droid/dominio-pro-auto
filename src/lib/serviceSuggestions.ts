@@ -60,14 +60,25 @@ export function getClientServiceRecurrence(
   );
 }
 
-/** Retorna o serviço recorrente mais usado que ainda está disponível no cadastro ativo. */
+/** Retorna os serviços recorrentes mais usados que ainda estão disponíveis no cadastro ativo. */
+export function getMostFrequentCurrentServices(
+  appointments: Appointment[],
+  services: Service[],
+  limit = 2,
+  now = new Date(),
+): ServiceRecurrence[] {
+  return getClientServiceRecurrence(appointments, services, now)
+    .filter(item => item.service?.active)
+    .slice(0, limit);
+}
+
+/** Retorna apenas a primeira sugestão ativa, preservando a API legada. */
 export function getMostFrequentCurrentService(
   appointments: Appointment[],
   services: Service[],
   now = new Date(),
 ): ServiceRecurrence | null {
-  return getClientServiceRecurrence(appointments, services, now)
-    .find(item => item.service?.active) ?? null;
+  return getMostFrequentCurrentServices(appointments, services, 1, now)[0] ?? null;
 }
 
 /** Reconstitui um snapshot de agendamento usando sempre os dados atuais do serviço. */
