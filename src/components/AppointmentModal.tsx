@@ -27,8 +27,7 @@ import { servicesStore } from "@/features/servicos";
 import { appointmentsStore, type Appointment, type AppointmentService } from "@/features/agenda";
 import { clientsStore } from "@/features/clientes";
 import {
-  getClientServiceRecurrence,
-  getMostFrequentCurrentService,
+  getMostFrequentCurrentServices,
   isHistoricalServiceAppointment,
   refreshAppointmentService,
   toCurrentAppointmentService,
@@ -276,17 +275,17 @@ export default function AppointmentModal({
         return (isSameId || isSameName) && isHistoricalServiceAppointment(a);
       })
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-    const suggestion = getMostFrequentCurrentService(clientAppts, servicesData);
+    const suggestions = getMostFrequentCurrentServices(clientAppts, servicesData);
 
     // Trocar cliente sem histórico não conserva por engano o serviço do cliente anterior.
-    setSelectedServices(suggestion?.service ? [toCurrentAppointmentService(suggestion.service)] : []);
+    setSelectedServices(suggestions.flatMap(item => item.service ? [toCurrentAppointmentService(item.service)] : []));
 
     if (clientAppts[0]?.employeeId) {
       setEmployeeId(String(clientAppts[0].employeeId));
     }
 
-    if (suggestion?.service) {
-      toast.success(`Sugestão carregada: ${suggestion.service.name} · R$ ${suggestion.service.price.toFixed(2)}`);
+    if (suggestions.length > 0) {
+      toast.success(`Sugestões carregadas: ${suggestions.map(item => item.service?.name).filter(Boolean).join(" e ")}`);
     }
   };
 
@@ -498,8 +497,7 @@ export default function AppointmentModal({
                       if (clientAppts.length === 0) return null;
                       const totalGasto = clientAppts.reduce((s, a) => s + (a.totalPrice || 0), 0);
                       const ultima = clientAppts[0];
-                      const topServices = getClientServiceRecurrence(clientAppts, servicesData).slice(0, 3);
-                      const suggestion = getMostFrequentCurrentService(clientAppts, servicesData);
+                      const suggestions = getMostFrequentCurrentServices(clientAppts, servicesData);
                       const lastEmp = employees.find(e => e.id === ultima.employeeId);
                       return (
                         <div className="p-2.5 rounded-lg bg-secondary/40 border border-border space-y-2">
@@ -511,17 +509,21 @@ export default function AppointmentModal({
                             <span>R$ {totalGasto.toFixed(0)} em serviços</span>
                             <span>Última visita: {safeFmt(ultima.startTime, "dd/MM")}</span>
                           </div>
-                          {suggestion?.service && (
-                            <div className="flex items-center gap-2 rounded-md border border-primary/20 bg-primary/5 p-2">
-                              <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
-                              <div className="min-w-0 flex-1 text-xs">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="font-medium text-primary">Mais recorrente</p>
-                                  <span className="shrink-0 text-[10px] text-primary">{suggestion.count}x</span>
-                                </div>
-                                <p className="truncate text-foreground">{suggestion.service.name} · R$ {suggestion.service.price.toFixed(2)}</p>
-                                <p className="text-[10px] text-muted-foreground">Preço atual do cadastro · carregado automaticamente</p>
+                          {suggestions.length > 0 && (
+                            <div className="space-y-1.5 rounded-md border border-primary/20 bg-primary/5 p-2">
+                              <div className="flex items-center gap-2">
+                                <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
+                                <p className="text-xs font-medium text-primary">Sugestões automáticas</p>
                               </div>
+                              {suggestions.map((item, index) => item.service && (
+                                <div key={item.serviceId} className="flex items-center justify-between gap-2 text-xs">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-foreground">{index === 0 ? "1º" : "2º"} · {item.service.name}</p>
+                                    <p className="text-[10px] text-muted-foreground">Preço atual · {item.count}x no histórico</p>
+                                  </div>
+                                  <span className="shrink-0 font-semibold text-primary">R$ {item.service.price.toFixed(2)}</span>
+                                </div>
+                              ))}
                             </div>
                           )}
                           {lastEmp && (
