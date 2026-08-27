@@ -5,6 +5,8 @@ export { expensesStore } from "../../lib/store/cash";
 export type { Appointment, Employee } from "../../lib/store/types";
 export {
   calcPeriodStats,
+  calcFinancialSummary,
+  calcPaidExpenses,
   calcRevenueByDay,
   calcRevenueByEmployee,
   calcPopularServices,
@@ -23,4 +25,4 @@ export {
   calcMaterialCost,
   calcCommission,
 } from "../../lib/analytics";
-export type { Period, PeriodStats, HistoricalStats } from "../../lib/analytics";
+export type { Period, PeriodStats, FinancialSummary, HistoricalStats } from "../../lib/analytics";
