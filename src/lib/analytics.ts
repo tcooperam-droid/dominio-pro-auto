@@ -10,7 +10,7 @@ import { appointmentsStore } from "../features/agenda";
 import { employeesStore } from "../features/funcionarios";
 import type { Appointment } from "../features/agenda";
 import type { Employee } from "../features/funcionarios";
-import type { Client } from "./store/types";
+import type { Client, Expense } from "./store/types";
 import {
   format, isWithinInterval, parseISO,
   startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear,
@@ -78,6 +78,14 @@ export function getAppointmentsInPeriod(start: Date, end: Date): Appointment[] {
   });
 }
 
+export function calcPaidExpenses(expenses: Expense[], start: Date, end: Date): number {
+  const startKey = format(start, "yyyy-MM-dd");
+  const endKey = format(end, "yyyy-MM-dd");
+  return expenses
+    .filter(expense => expense.status === "paga" && expense.date >= startKey && expense.date <= endKey)
+    .reduce((sum, expense) => sum + toNum(expense.amount), 0);
+}
+
 export function calcMaterialCost(appt: Appointment): number {
   return (appt.services ?? []).reduce((sum, s) => {
     return sum + (toNum(s.price) * (toNum(s.materialCostPercent) / 100));
@@ -104,6 +112,40 @@ export interface PeriodStats {
   cancelRate:        number;
   scheduledRevenue:  number;
   scheduledCount:    number;
+}
+
+export interface FinancialSummary {
+  grossRevenue: number;
+  materialCost: number;
+  commissions: number;
+  paidExpenses: number;
+  afterCommissions: number;
+  afterCommissionsAndExpenses: number;
+  afterCostsAndExpenses: number;
+}
+
+/**
+ * Consolida a ponte financeira do período realizado.
+ * Despesas entram somente quando já estão pagas; custo de material continua
+ * sendo descontado antes da comissão pela regra Compartilhar Custos.
+ */
+export function calcFinancialSummary(
+  appts: Appointment[],
+  employees: Employee[],
+  paidExpenses = 0,
+): FinancialSummary {
+  const stats = calcPeriodStats(appts, employees);
+  const afterCommissions = stats.totalRevenue - stats.totalCommissions;
+  const afterCommissionsAndExpenses = afterCommissions - paidExpenses;
+  return {
+    grossRevenue: stats.totalRevenue,
+    materialCost: stats.totalMaterial,
+    commissions: stats.totalCommissions,
+    paidExpenses,
+    afterCommissions,
+    afterCommissionsAndExpenses,
+    afterCostsAndExpenses: afterCommissionsAndExpenses - stats.totalMaterial,
+  };
 }
 
 export function calcPeriodStats(appts: Appointment[], employees: Employee[]): PeriodStats {

@@ -2,13 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { format } from "date-fns";
 import {
   calcCommission,
+  calcFinancialSummary,
+  calcPaidExpenses,
   calcConversionRate,
   calcInactiveClients,
   calcPeriodStats,
   isFinancialAppointment,
 } from "./analytics";
 import { getReportRange, shiftReportPeriod } from "./reportPeriods";
-import type { Appointment, Client, Employee } from "./store/types";
+import type { Appointment, Client, Employee, Expense } from "./store/types";
 
 const employee: Employee = {
   id: 1,
@@ -93,6 +95,31 @@ describe("regras do Financeiro baseadas na Agenda", () => {
       count: 1,
       totalCommissions: 8,
     });
+  });
+
+  it("separa bruto, após comissão e após custos e despesas pagas", () => {
+    const summary = calcFinancialSummary([appointment()], [employee], 25);
+
+    expect(summary).toMatchObject({
+      grossRevenue: 100,
+      materialCost: 20,
+      commissions: 8,
+      paidExpenses: 25,
+      afterCommissions: 92,
+      afterCommissionsAndExpenses: 67,
+      afterCostsAndExpenses: 47,
+    });
+  });
+
+  it("soma somente despesas pagas dentro do período", () => {
+    const expenses: Expense[] = [
+      { id: 1, date: "2026-08-10", amount: 25, category: "Aluguel", status: "paga", notes: null, createdAt: "2026-08-10T12:00:00.000Z" },
+      { id: 2, date: "2026-08-11", amount: 40, category: "Energia", status: "pendente", notes: null, createdAt: "2026-08-11T12:00:00.000Z" },
+      { id: 3, date: "2026-08-20", amount: 15, category: "Material", status: "paga", notes: null, createdAt: "2026-08-20T12:00:00.000Z" },
+      { id: 4, date: "2026-09-01", amount: 90, category: "Aluguel", status: "paga", notes: null, createdAt: "2026-09-01T12:00:00.000Z" },
+    ];
+
+    expect(calcPaidExpenses(expenses, new Date("2026-08-01T00:00:00"), new Date("2026-08-31T23:59:59"))).toBe(40);
   });
 
   it("remove do realizado somente alterações explícitas canceladas ou no-show", () => {

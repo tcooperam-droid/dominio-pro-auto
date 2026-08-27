@@ -22,9 +22,10 @@ import {
 import { appointmentsStore } from "@/features/agenda";
 import { employeesStore } from "@/features/funcionarios";
 import {
-  calcPeriodStats, calcRevenueByEmployee,
+  calcPeriodStats, calcFinancialSummary, calcRevenueByEmployee,
   calcPopularServices, getAppointmentsInPeriod,
   toNum, calcMonthlyHistory, calcYearlyHistory, isFinancialAppointment,
+  calcPaidExpenses, expensesStore,
 } from "@/features/relatorios";
 import { cn } from "@/lib/utils";
 import {
@@ -104,6 +105,16 @@ export default function RelatoriosPage() {
   const stats = useMemo(() => calcPeriodStats(appts, employees), [appts, employees]);
   const prevStats = useMemo(() => calcPeriodStats(prevAppts, employees), [prevAppts, employees]);
   const futureStats = useMemo(() => calcPeriodStats(futureAppts, employees), [futureAppts, employees]);
+  const expenses = useMemo(() => expensesStore.list(), [storeVersion]);
+  const realizedEnd = end < now ? end : now;
+  const paidExpenses = useMemo(
+    () => calcPaidExpenses(expenses, start, realizedEnd),
+    [expenses, start, realizedEnd],
+  );
+  const financialSummary = useMemo(
+    () => calcFinancialSummary(appts, employees, paidExpenses),
+    [appts, employees, paidExpenses],
+  );
 
   const byDay = useMemo(() => {
     const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000) + 1);
@@ -197,12 +208,15 @@ export default function RelatoriosPage() {
   }, [allAppts, now]);
 
   const kpis = [
-    { label: "Faturamento", value: fmt(stats.totalRevenue), icon: DollarSign, color: "#ec4899", growth: growth.revenue },
-    { label: "Líquido", value: fmt(stats.netRevenue), icon: TrendingUp, color: "#22c55e", growth: null },
+    { label: "Bruto da Agenda", value: fmt(financialSummary.grossRevenue), icon: DollarSign, color: "#ec4899", growth: growth.revenue },
+    { label: "Após comissões", value: fmt(financialSummary.afterCommissions), icon: TrendingUp, color: "#22c55e", growth: null },
+    { label: "Após comissões e despesas", value: fmt(financialSummary.afterCommissionsAndExpenses), icon: TrendingUp, color: "#14b8a6", growth: null },
+    { label: "Resultado após todos os custos", value: fmt(financialSummary.afterCostsAndExpenses), icon: TrendingUp, color: "#0ea5e9", growth: null },
     { label: "Atendimentos", value: String(stats.count), icon: Calendar, color: "#3b82f6", growth: growth.count },
     { label: "Ticket Médio", value: fmt(stats.avgTicket), icon: DollarSign, color: "#f59e0b", growth: growth.avgTicket },
-    { label: "Comissões", value: fmt(stats.totalCommissions), icon: Percent, color: "#8b5cf6", growth: null },
-    { label: "Custo Material", value: fmt(stats.totalMaterial), icon: Scissors, color: "#06b6d4", growth: null },
+    { label: "Comissões descontadas", value: fmt(financialSummary.commissions), icon: Percent, color: "#8b5cf6", growth: null },
+    { label: "Despesas pagas", value: fmt(financialSummary.paidExpenses), icon: BarChart3, color: "#f97316", growth: null },
+    { label: "Custo de material", value: fmt(financialSummary.materialCost), icon: Scissors, color: "#06b6d4", growth: null },
     { label: "Cancelamentos", value: `${stats.cancelRate.toFixed(1)}%`, icon: Users, color: "#ef4444", growth: growth.cancelRate, inverse: true },
   ];
 
@@ -282,7 +296,7 @@ export default function RelatoriosPage() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-pink-300/80">Desempenho</p>
             <h3 className="mt-1 text-lg font-bold">Realizado no período</h3>
           </div>
-          <p className="text-xs text-muted-foreground">{stats.count} atendimento(s) contabilizado(s)</p>
+            <p className="text-xs text-muted-foreground">Bruto {fmt(financialSummary.grossRevenue)} · despesas pagas {fmt(financialSummary.paidExpenses)}</p>
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {kpis.map(({ label, value, icon: Icon, color, growth, inverse }) => (
