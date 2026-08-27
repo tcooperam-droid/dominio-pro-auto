@@ -17,10 +17,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
-} from "@/components/ui/command";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -104,7 +100,6 @@ export default function AppointmentModal({
   const [status, setStatus]                     = useState("scheduled");
   const [notes, setNotes]                       = useState("");
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
-  const [servicePickerOpen, setServicePickerOpen] = useState(false);
   const [loading, setLoading]                   = useState(false);
   const formInitializedRef = useRef<string | null>(null);
   const formKey = appointment
@@ -167,7 +162,6 @@ export default function AppointmentModal({
     }
     if (formInitializedRef.current === formKey) return;
     formInitializedRef.current = formKey;
-    setServicePickerOpen(false);
     if (appointment) {
       setClientName(appointment.clientName ?? "");
       setClientId(appointment.clientId ?? null);
@@ -202,7 +196,6 @@ export default function AppointmentModal({
       setStatus("scheduled");
       setNotes("");
       setSelectedServices([]);
-      setServicePickerOpen(false);
     }
   }, [open, appointment, defaultEmployeeId, defaultHour, defaultMinute, groupClientName, incomingGroupId, formKey]);
 
@@ -693,49 +686,27 @@ export default function AppointmentModal({
               </div>
             )}
             {availableServices.length > 0 && (
-              <Popover open={servicePickerOpen} onOpenChange={setServicePickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    aria-expanded={servicePickerOpen}
-                    aria-haspopup="listbox"
-                    className="w-full justify-start border-dashed font-normal"
-                  >
-                    <Plus className="mr-2 h-3.5 w-3.5" />
-                    <span className="text-sm text-muted-foreground">Adicionar serviço</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-[min(28rem,calc(100vw-2rem))] p-0">
-                  <Command>
-                    <CommandInput placeholder="Buscar serviço..." />
-                    <CommandList className="max-h-64 overflow-y-auto overscroll-contain">
-                      <CommandEmpty>Nenhum serviço disponível.</CommandEmpty>
-                      <CommandGroup heading="Serviços disponíveis">
-                        {availableServices.map(svc => (
-                          <CommandItem
-                            key={svc.id}
-                            value={`${svc.name} ${svc.id}`}
-                            onSelect={() => {
-                              addService(String(svc.id));
-                              setServicePickerOpen(false);
-                            }}
-                            className="cursor-pointer"
-                          >
-                            <div className="flex w-full min-w-0 items-center gap-2">
-                              <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: svc.color }} />
-                              <span className="min-w-0 flex-1 truncate">{svc.name}</span>
-                              <span className="shrink-0 text-xs text-muted-foreground">
-                                {svc.durationMinutes}min · R$ {svc.price.toFixed(2)}
-                              </span>
-                            </div>
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <Select onValueChange={addService} value="">
+                <SelectTrigger className="border-dashed">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="text-sm">Adicionar serviço</span>
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {availableServices.map(svc => (
+                    <SelectItem key={svc.id} value={String(svc.id)}>
+                      <div className="flex items-center gap-2 w-full">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: svc.color }} />
+                        <span className="flex-1">{svc.name}</span>
+                        <span className="text-muted-foreground text-xs ml-2">
+                          {svc.durationMinutes}min — R$ {svc.price.toFixed(2)}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
           </div>
 
