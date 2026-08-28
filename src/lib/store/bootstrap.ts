@@ -8,6 +8,7 @@ import { clientsStore } from "./clients";
 import { employeesStore } from "./employees";
 import { expensesStore } from "./cash";
 import { servicesStore } from "./services";
+import { servicePackagesStore } from "./packages";
 import { cache, toAppointment } from "./shared";
 
 export interface BootstrapResult {
@@ -69,6 +70,7 @@ export function fetchAllData(options: { force?: boolean } = {}): Promise<Bootstr
     const loaders: Array<[string, () => Promise<unknown>]> = [
       ["funcionários", () => employeesStore.fetchAll()],
       ["serviços", () => servicesStore.fetchAll()],
+      ["pacotes", () => servicePackagesStore.fetchAll()],
       ["clientes", () => clientsStore.fetchAll()],
       ["agendamentos", () => appointmentsStore.fetchAll()],
       ["sessões de caixa", () => cashSessionsStore.fetchAll()],

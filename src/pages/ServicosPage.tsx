@@ -12,8 +12,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, Scissors, Clock, DollarSign } from "lucide-react";
-import { servicesStore, type Service } from "@/features/servicos";
+import { Plus, Pencil, Trash2, Scissors, Clock, DollarSign, Package } from "lucide-react";
+import { servicesStore, servicePackagesStore, type Service, type ServicePackage } from "@/features/servicos";
 
 const COLORS = ["#ec4899", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#3b82f6", "#84cc16", "#f97316", "#6366f1"];
 
@@ -22,6 +22,18 @@ interface ServiceForm {
   price: string; materialCostPercent: string; color: string; active: boolean;
   commissionMode: "cost_first";
 }
+
+interface PackageForm {
+  name: string;
+  description: string;
+  serviceIds: number[];
+  discount: string;
+  active: boolean;
+}
+
+const defaultPackageForm = (): PackageForm => ({
+  name: "", description: "", serviceIds: [], discount: "", active: true,
+});
 
 const defaultForm = (): ServiceForm => ({
   name: "", description: "", durationMinutes: 60, price: "", materialCostPercent: "0", color: COLORS[0], active: true,
@@ -34,9 +46,14 @@ export default function ServicosPage() {
   const [form, setForm] = useState<ServiceForm>(defaultForm());
   const [loading, setLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [packageModalOpen, setPackageModalOpen] = useState(false);
+  const [editingPackageId, setEditingPackageId] = useState<number | null>(null);
+  const [packageForm, setPackageForm] = useState<PackageForm>(defaultPackageForm());
+  const [packageLoading, setPackageLoading] = useState(false);
   const storeVersion = useStoreVersion();
 
   const services = useMemo(() => servicesStore.list(false), [refreshKey, storeVersion]);
+  const packages = useMemo(() => servicePackagesStore.list(false), [refreshKey, storeVersion]);
 
   const openCreate = () => { setEditingId(null); setForm(defaultForm()); setModalOpen(true); };
 
@@ -52,6 +69,78 @@ export default function ServicosPage() {
     });
     setModalOpen(true);
   };
+
+  const openCreatePackage = () => {
+    setEditingPackageId(null);
+    setPackageForm(defaultPackageForm());
+    setPackageModalOpen(true);
+  };
+
+  const openEditPackage = (pkg: ServicePackage) => {
+    setEditingPackageId(pkg.id);
+    setPackageForm({
+      name: pkg.name,
+      description: pkg.description ?? "",
+      serviceIds: pkg.serviceIds,
+      discount: pkg.discount != null ? String(pkg.discount) : "",
+      active: pkg.active,
+    });
+    setPackageModalOpen(true);
+  };
+
+  const togglePackageService = (serviceId: number) => {
+    setPackageForm(current => ({
+      ...current,
+      serviceIds: current.serviceIds.includes(serviceId)
+        ? current.serviceIds.filter(id => id !== serviceId)
+        : [...current.serviceIds, serviceId],
+    }));
+  };
+
+  const handlePackageSubmit = async () => {
+    if (!packageForm.name.trim()) { toast.error("Nome do pacote é obrigatório"); return; }
+    if (packageForm.serviceIds.length === 0) { toast.error("Selecione pelo menos um serviço"); return; }
+    const discount = packageForm.discount.trim() ? parseFloat(packageForm.discount) : null;
+    if (discount != null && (Number.isNaN(discount) || discount < 0)) { toast.error("Desconto inválido"); return; }
+    setPackageLoading(true);
+    try {
+      const payload = {
+        name: packageForm.name.trim(),
+        description: packageForm.description.trim() || null,
+        serviceIds: packageForm.serviceIds,
+        discount,
+        active: packageForm.active,
+      };
+      if (editingPackageId) {
+        await servicePackagesStore.update(editingPackageId, payload);
+        toast.success("Pacote atualizado!");
+      } else {
+        await servicePackagesStore.create(payload);
+        toast.success("Pacote criado!");
+      }
+      setPackageModalOpen(false);
+      setRefreshKey(k => k + 1);
+    } catch (error: any) {
+      toast.error(error?.message ?? "Erro ao salvar pacote");
+    } finally {
+      setPackageLoading(false);
+    }
+  };
+
+  const handleDeletePackage = async (pkg: ServicePackage) => {
+    if (!confirm(`Remover o pacote "${pkg.name}"?`)) return;
+    try {
+      await servicePackagesStore.delete(pkg.id);
+      toast.success("Pacote removido");
+      setRefreshKey(k => k + 1);
+    } catch (error: any) {
+      toast.error(error?.message ?? "Erro ao remover pacote");
+    }
+  };
+
+  const packageServices = (pkg: ServicePackage) => pkg.serviceIds
+    .map(id => services.find(service => service.id === id))
+    .filter((service): service is Service => Boolean(service));
 
   const handleSubmit = async () => {
     if (!form.name.trim()) { toast.error("Nome é obrigatório"); return; }
@@ -91,12 +180,44 @@ export default function ServicosPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold">Serviços</h2>
-          <p className="text-sm text-muted-foreground">{services.filter(s => s.active).length} ativos</p>
+          <p className="text-sm text-muted-foreground">{services.filter(s => s.active).length} ativos · {packages.filter(pkg => pkg.active).length} pacotes ativos</p>
         </div>
-        <Button onClick={openCreate} className="gap-2 text-xs">
-          <Plus className="w-3.5 h-3.5" />Novo Serviço
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={openCreatePackage} className="gap-2 text-xs">
+            <Package className="w-3.5 h-3.5" />Novo Pacote
+          </Button>
+          <Button onClick={openCreate} className="gap-2 text-xs">
+            <Plus className="w-3.5 h-3.5" />Novo Serviço
+          </Button>
+        </div>
       </div>
+
+      {packages.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center gap-2"><Package className="w-4 h-4 text-primary" /><h3 className="font-semibold">Pacotes fixos</h3></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {packages.map(pkg => {
+              const included = packageServices(pkg);
+              const total = included.reduce((sum, service) => sum + service.price, 0);
+              return (
+                <Card key={pkg.id} className={`border-primary/20 bg-primary/5 ${!pkg.active ? "opacity-50" : ""}`}>
+                  <CardContent className="pt-4 space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div><h3 className="font-semibold text-sm">{pkg.name}</h3>{pkg.description && <p className="text-xs text-muted-foreground mt-1">{pkg.description}</p>}</div>
+                      <div className="flex gap-1 shrink-0">
+                        <Button variant="ghost" size="icon" className="w-7 h-7" onClick={() => openEditPackage(pkg)}><Pencil className="w-3.5 h-3.5" /></Button>
+                        <Button variant="ghost" size="icon" className="w-7 h-7 text-destructive hover:text-destructive" onClick={() => handleDeletePackage(pkg)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1">{included.map(service => <Badge key={service.id} variant="secondary" className="text-[10px]">{service.name}</Badge>)}</div>
+                    <div className="flex items-center justify-between text-xs"><span className="text-muted-foreground">{included.length} serviços · R$ {total.toFixed(2)}</span>{!pkg.active && <Badge variant="secondary" className="text-[10px]">Inativo</Badge>}</div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {services.length === 0 ? (
         <div className="text-center py-16 text-muted-foreground">
@@ -146,6 +267,21 @@ export default function ServicosPage() {
           ))}
         </div>
       )}
+
+      {/* Modal de pacote */}
+      <Dialog open={packageModalOpen} onOpenChange={v => !v && setPackageModalOpen(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>{editingPackageId ? "Editar Pacote" : "Novo Pacote"}</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1"><Label>Nome do pacote *</Label><Input value={packageForm.name} onChange={e => setPackageForm(p => ({ ...p, name: e.target.value }))} placeholder="Ex.: Corte completo" /></div>
+            <div className="space-y-1"><Label>Descrição</Label><Textarea value={packageForm.description} onChange={e => setPackageForm(p => ({ ...p, description: e.target.value }))} placeholder="Descrição opcional" rows={2} /></div>
+            <div className="space-y-2"><Label>Serviços incluídos *</Label><div className="max-h-48 overflow-y-auto space-y-1 rounded-md border border-border p-2">{services.filter(service => service.active).map(service => <button key={service.id} type="button" onClick={() => togglePackageService(service.id)} className={`w-full flex items-center justify-between rounded-md px-2.5 py-2 text-left text-sm transition-colors ${packageForm.serviceIds.includes(service.id) ? "bg-primary/15 text-primary" : "hover:bg-secondary"}`}><span>{service.name}</span><span className="text-xs text-muted-foreground">R$ {service.price.toFixed(2)}</span></button>)}</div><p className="text-[10px] text-muted-foreground">O pacote usará o preço e a duração atuais de cada serviço.</p></div>
+            <div className="space-y-1"><Label>Desconto opcional (R$)</Label><Input type="number" min="0" step="0.01" value={packageForm.discount} onChange={e => setPackageForm(p => ({ ...p, discount: e.target.value }))} placeholder="Sem desconto" /></div>
+            {editingPackageId && <div className="flex items-center gap-2"><Switch checked={packageForm.active} onCheckedChange={v => setPackageForm(p => ({ ...p, active: v }))} /><Label>Pacote ativo</Label></div>}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setPackageModalOpen(false)} disabled={packageLoading}>Cancelar</Button><Button onClick={handlePackageSubmit} disabled={packageLoading}>{packageLoading ? "Salvando..." : editingPackageId ? "Salvar" : "Criar Pacote"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal */}
       <Dialog open={modalOpen} onOpenChange={v => !v && setModalOpen(false)}>
