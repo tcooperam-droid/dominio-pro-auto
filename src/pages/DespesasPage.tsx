@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { expensesStore, type Expense } from "@/features/financeiro";
 import { format, parseISO, isBefore, startOfDay } from "date-fns";
+import { getExpenseMonthRange, shiftExpenseMonth } from "@/lib/expensePeriods";
 import { ptBR } from "date-fns/locale";
 import { 
   Receipt, Plus, Search, Filter, Trash2, Edit2, 
   AlertCircle, CheckCircle2, Clock, ArrowLeft,
-  ChevronDown, X
+  ChevronDown, ChevronLeft, ChevronRight, X
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ export default function DespesasPage() {
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [monthAnchor, setMonthAnchor] = useState(() => new Date());
 
   // Form State
   const [formData, setFormData] = useState<ExpenseFormData>({
@@ -75,7 +77,14 @@ export default function DespesasPage() {
     }
   }
 
-  const filteredExpenses = expenses.filter(e => {
+  const { start: monthStart, end: monthEnd } = getExpenseMonthRange(monthAnchor);
+  const monthStartKey = format(monthStart, "yyyy-MM-dd");
+  const monthEndKey = format(monthEnd, "yyyy-MM-dd");
+  const monthExpenses = expenses.filter(expense => expense.date >= monthStartKey && expense.date <= monthEndKey);
+  const monthLabel = format(monthStart, "MMMM 'de' yyyy", { locale: ptBR });
+  const currentMonthKey = format(new Date(), "yyyy-MM");
+
+  const filteredExpenses = monthExpenses.filter(e => {
     const matchesCategory = !filterCategory || e.category === filterCategory;
     const matchesStatus = !filterStatus || e.status === filterStatus;
     const matchesSearch = !searchQuery || 
@@ -100,7 +109,7 @@ export default function DespesasPage() {
 
   const chartData = CATEGORIES.map(cat => ({
     name: cat.label,
-    value: expenses.filter(e => e.category === cat.id).reduce((sum, e) => sum + e.amount, 0),
+    value: monthExpenses.filter(e => e.category === cat.id).reduce((sum, e) => sum + e.amount, 0),
     color: cat.color
   })).filter(d => d.value > 0).sort((a, b) => b.value - a.value);
 
@@ -198,6 +207,40 @@ export default function DespesasPage() {
           <Plus className="w-5 h-5" />
           Nova Despesa
         </button>
+      </div>
+
+      {/* Navegação mensal */}
+      <div className="rounded-3xl bg-white/5 border border-white/10 backdrop-blur-xl p-3 md:p-4 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          aria-label={`Mês anterior a ${monthLabel}`}
+          onClick={() => setMonthAnchor(month => shiftExpenseMonth(month, -1))}
+          className="w-11 h-11 shrink-0 rounded-2xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+        <div className="min-w-0 text-center">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">Período das despesas</p>
+          <h2 className="text-lg md:text-xl font-bold text-white capitalize truncate">{monthLabel}</h2>
+          <p className="text-xs text-white/40 mt-0.5">{monthExpenses.length} lançamento(s) neste mês</p>
+        </div>
+        <button
+          type="button"
+          aria-label={`Próximo mês após ${monthLabel}`}
+          onClick={() => setMonthAnchor(month => shiftExpenseMonth(month, 1))}
+          className="w-11 h-11 shrink-0 rounded-2xl bg-white/5 border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-colors flex items-center justify-center"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
+        {format(monthStart, "yyyy-MM") !== currentMonthKey && (
+          <button
+            type="button"
+            onClick={() => setMonthAnchor(new Date())}
+            className="hidden md:block shrink-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-semibold text-white/60 hover:text-white transition-colors"
+          >
+            Mês atual
+          </button>
+        )}
       </div>
 
       {/* KPIs */}
