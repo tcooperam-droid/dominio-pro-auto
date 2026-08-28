@@ -11,6 +11,7 @@ import type {
   Employee,
   Expense,
   Service,
+  ServicePackage,
 } from "./types";
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -121,6 +122,25 @@ export function toService(r: any): Service {
     materialCostPercent: Number(r.material_cost_percent ?? 0),
     commissionMode: "cost_first",
     color: r.color ?? "#ec4899",
+    active: r.active ?? true,
+    createdAt: r.created_at,
+  };
+}
+
+export function toServicePackage(r: any): ServicePackage {
+  let serviceIds: number[] = [];
+  try {
+    const parsed = typeof r.service_ids === "string" ? JSON.parse(r.service_ids) : r.service_ids;
+    serviceIds = Array.isArray(parsed) ? parsed.map(Number).filter(Number.isFinite) : [];
+  } catch {
+    serviceIds = [];
+  }
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    description: r.description ?? null,
+    serviceIds,
+    discount: r.discount != null ? Number(r.discount) : null,
     active: r.active ?? true,
     createdAt: r.created_at,
   };
@@ -242,6 +262,7 @@ export function toCommissionClosing(r: any): CommissionClosing {
 export const cache = {
   employees: [] as Employee[],
   services: [] as Service[],
+  servicePackages: [] as ServicePackage[],
   clients: [] as Client[],
   appointments: [] as Appointment[],
   cashSessions: [] as CashSession[],

@@ -21,9 +21,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Trash2, Clock, DollarSign, X, Link2, UserPlus, Search, RotateCcw, History, Sparkles } from "lucide-react";
+import { Plus, Trash2, Clock, DollarSign, X, Link2, UserPlus, Search, RotateCcw, History, Sparkles, Package } from "lucide-react";
 import { employeesStore } from "@/features/funcionarios";
-import { servicesStore } from "@/features/servicos";
+import { servicesStore, servicePackagesStore, type ServicePackage } from "@/features/servicos";
 import { appointmentsStore, type Appointment, type AppointmentService } from "@/features/agenda";
 import { clientsStore } from "@/features/clientes";
 import {
@@ -107,6 +107,7 @@ export default function AppointmentModal({
 
   const employees = useMemo(() => employeesStore.list(true), [open, storeVersion]);
   const servicesData = useMemo(() => servicesStore.list(true), [open, storeVersion]);
+  const packagesData = useMemo(() => servicePackagesStore.list(true), [open, storeVersion]);
   const [clientsKey, setClientsKey] = useState(0);
   const [appointmentsKey, setAppointmentsKey] = useState(0);
   const allClients = useMemo(() => clientsStore.list(), [open, clientsKey]);
@@ -229,6 +230,29 @@ export default function AppointmentModal({
       materialCostPercent: svc.materialCostPercent ?? 0,
       commissionMode: "cost_first",
     }]);
+  };
+
+  const addPackage = (pkg: ServicePackage) => {
+    const packageServices = pkg.serviceIds
+      .map(id => servicesData.find(service => service.id === id))
+      .filter((service): service is typeof servicesData[number] => Boolean(service));
+    const newServices = packageServices
+      .filter(service => !selectedServices.some(selected => selected.serviceId === service.id))
+      .map(service => ({
+        serviceId: service.id,
+        name: service.name,
+        price: service.price,
+        durationMinutes: service.durationMinutes,
+        color: service.color,
+        materialCostPercent: service.materialCostPercent ?? 0,
+        commissionMode: "cost_first" as const,
+      }));
+    if (newServices.length === 0) {
+      toast.error("Todos os serviços deste pacote já estão selecionados");
+      return;
+    }
+    setSelectedServices(current => [...current, ...newServices]);
+    toast.success(`${newServices.length} serviço(s) do pacote "${pkg.name}" adicionado(s)`);
   };
 
   const removeService = (serviceId: number) =>
@@ -668,6 +692,19 @@ export default function AppointmentModal({
               <Label>Serviços *</Label>
               <span className="text-[10px] text-muted-foreground">Preço atual do cadastro</span>
             </div>
+            {packagesData.length > 0 && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 space-y-2">
+                <div className="flex items-center gap-2"><Package className="h-3.5 w-3.5 text-primary" /><p className="text-xs font-semibold text-primary">Pacotes rápidos</p></div>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {packagesData.map(pkg => {
+                    const included = pkg.serviceIds.map(id => servicesData.find(service => service.id === id)).filter(Boolean);
+                    const total = included.reduce((sum, service) => sum + (service?.price ?? 0), 0);
+                    const duration = included.reduce((sum, service) => sum + (service?.durationMinutes ?? 0), 0);
+                    return <button key={pkg.id} type="button" onClick={() => addPackage(pkg)} className="flex items-center justify-between gap-2 rounded-md border border-border/70 bg-background/60 px-2.5 py-2 text-left transition-colors hover:bg-primary/10"><span className="min-w-0"><span className="block truncate text-xs font-medium">{pkg.name}</span><span className="block truncate text-[10px] text-muted-foreground">{included.length} serviços · {duration} min</span></span><span className="shrink-0 text-xs font-semibold text-primary">R$ {total.toFixed(2)}</span></button>;
+                  })}
+                </div>
+              </div>
+            )}
             {selectedServices.length > 0 && (
               <div className="space-y-1.5">
                 {selectedServices.map(svc => (

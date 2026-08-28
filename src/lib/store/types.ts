@@ -31,6 +31,16 @@ export interface Service {
   createdAt: string;
 }
 
+export interface ServicePackage {
+  id: number;
+  name: string;
+  description: string | null;
+  serviceIds: number[];
+  discount: number | null;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface Client {
   id: number;
   name: string;

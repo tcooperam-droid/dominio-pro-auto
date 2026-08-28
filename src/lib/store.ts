@@ -8,6 +8,7 @@ export * from "./store/commission";
 export * from "./store/types";
 export { employeesStore } from "./store/employees";
 export { servicesStore } from "./store/services";
+export { servicePackagesStore } from "./store/packages";
 export { clientsStore } from "./store/clients";
 export { appointmentsStore } from "./store/appointments";
 export {
