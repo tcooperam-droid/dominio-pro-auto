@@ -136,7 +136,7 @@ export default function DespesasPage() {
       setIsModalOpen(false);
       setEditingExpense(null);
       setFormData({
-        date: format(new Date(), "yyyy-MM-dd"),
+        date: format(monthStart, "yyyy-MM-dd"),
         category: "outras",
         description: "",
         amount: "",
@@ -192,7 +192,7 @@ export default function DespesasPage() {
            onClick={() => {
              setEditingExpense(null);
              setFormData({
-               date: format(new Date(), "yyyy-MM-dd"),
+               date: format(monthStart, "yyyy-MM-dd"),
                category: "outras",
                description: "",
                amount: "",
