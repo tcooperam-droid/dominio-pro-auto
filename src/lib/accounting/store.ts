@@ -9,7 +9,7 @@ const companyRow = (row: any): AccountingCompany => ({
   id: row.id,
   name: row.name,
   cnpj: row.cnpj,
-  tradeName: row.trade_name ?? null,
+  tradeName: null,
   active: row.active !== false,
 });
 
@@ -43,9 +43,9 @@ export const accountingStore = {
     return (data ?? []).map(membershipRow);
   },
 
-  async createCompany(input: { name: string; cnpj: string; tradeName?: string | null }): Promise<AccountingCompany> {
+  async createCompany(input: { name: string; cnpj: string }): Promise<AccountingCompany> {
     const { data, error } = await supabase.from("accounting_companies").insert({
-      name: input.name.trim(), cnpj: input.cnpj.replace(/\D/g, ""), trade_name: input.tradeName?.trim() || null,
+      name: input.name.trim(), cnpj: input.cnpj.replace(/\D/g, ""),
     }).select().single();
     if (error) throw error;
     return companyRow(data);

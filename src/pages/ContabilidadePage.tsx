@@ -25,6 +25,8 @@ function formatDate(value: string) {
 export default function ContabilidadePage() {
   const [start, setStart] = useState(firstOfAccountingPeriod);
   const [end, setEnd] = useState(isoToday);
+  const [appliedStart, setAppliedStart] = useState(firstOfAccountingPeriod);
+  const [appliedEnd, setAppliedEnd] = useState(isoToday);
   const [companyId, setCompanyId] = useState("all");
   const [companies, setCompanies] = useState<AccountingCompany[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -56,7 +58,7 @@ export default function ContabilidadePage() {
           }
         }
       }
-      const production = await accountingStore.loadProduction(start, end, companyId === "all" ? undefined : companyId);
+      const production = await accountingStore.loadProduction(appliedStart, appliedEnd, companyId === "all" ? undefined : companyId);
       setCompanies(production.companies);
       setRows(production.rows);
     } catch (cause: any) {
@@ -66,7 +68,17 @@ export default function ContabilidadePage() {
     }
   };
 
-  useEffect(() => { void load(); }, [start, end, companyId]);
+  useEffect(() => { void load(); }, [appliedStart, appliedEnd, companyId]);
+
+  const applyPeriod = () => {
+    if (!start || !end) return;
+    if (start > end) {
+      setError("A data inicial não pode ser posterior à data final.");
+      return;
+    }
+    setAppliedStart(start);
+    setAppliedEnd(end);
+  };
 
   const summary = useMemo(() => ({
     appointments: rows.length,
@@ -76,9 +88,9 @@ export default function ContabilidadePage() {
 
   const exportCsv = async () => {
     if (!rows.length) return;
-    downloadText(`producao-prevista-${start}-${end}.csv`, productionToCsv(rows));
+    downloadText(`producao-prevista-${appliedStart}-${appliedEnd}.csv`, productionToCsv(rows));
     const selected = companyId === "all" ? companies[0] : companies.find(company => company.id === companyId);
-    if (selected) await accountingStore.recordExport({ companyId: selected.id, periodStart: start, periodEnd: end, format: "csv", rowCount: rows.length });
+    if (selected) await accountingStore.recordExport({ companyId: selected.id, periodStart: appliedStart, periodEnd: appliedEnd, format: "csv", rowCount: rows.length });
     toast.success("Exportação criada", { description: "O arquivo CSV da produção prevista foi baixado." });
   };
 
@@ -99,10 +111,10 @@ export default function ContabilidadePage() {
 
         <section className="rounded-xl border bg-card p-4">
           <div className="grid gap-4 md:grid-cols-[1fr_1fr_2fr_auto] md:items-end">
-            <label className="text-sm">Início<input type="date" value={start} onChange={event => setStart(event.target.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2" /></label>
-            <label className="text-sm">Fim<input type="date" value={end} onChange={event => setEnd(event.target.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2" /></label>
-            <label className="text-sm">Empresa<select value={companyId} onChange={event => setCompanyId(event.target.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2"><option value="all">Todas as empresas</option>{companies.map(company => <option key={company.id} value={company.id}>{company.name} — {company.cnpj}</option>)}</select></label>
-            <button onClick={() => void exportCsv()} disabled={!rows.length || loading} className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">Exportar CSV</button>
+            <label className="text-sm">Início<input type="date" value={start} onChange={event => setStart(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2" /></label>
+            <label className="text-sm">Fim<input type="date" value={end} onChange={event => setEnd(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2" /></label>
+            <label className="text-sm">Empresa<select value={companyId} onChange={event => setCompanyId(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2"><option value="all">Todas as empresas</option>{companies.map(company => <option key={company.id} value={company.id}>{company.name} — {company.cnpj}</option>)}</select></label>
+            <div className="flex gap-2"><button onClick={applyPeriod} disabled={loading} className="rounded-md border px-4 py-2 font-medium disabled:opacity-50">Aplicar período</button><button onClick={() => void exportCsv()} disabled={!rows.length || loading} className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">Exportar CSV</button></div>
           </div>
         </section>
 
