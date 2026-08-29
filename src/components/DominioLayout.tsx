@@ -27,6 +27,7 @@ const PRIMARY_NAV = [
 const SECONDARY_NAV = [
   { path: "/despesas",              label: "Despesas",      icon: Receipt     },
   { path: "/comissoes",             label: "Comissões",     icon: Percent     },
+  { path: "/contabilidade",         label: "Contabilidade", icon: Receipt     },
   { path: "/funcionarios",          label: "Funcionários",  icon: UserCheck   },
   { path: "/servicos",              label: "Serviços",      icon: Scissors    },
   { path: "/ferramentas-clientes",  label: "Ferramentas",   icon: Wrench      },

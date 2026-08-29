@@ -16,6 +16,7 @@ const FerramentasClientesPage = lazy(() => import("../pages/FerramentasClientesP
 const DespesasPage = lazy(() => import("../pages/DespesasPage"));
 const ComissoesPage = lazy(() => import("../pages/ComissoesPage"));
 const FinanceiroDashboardPage = lazy(() => import("../pages/FinanceiroDashboardPage"));
+const ContabilidadePage = lazy(() => import("../pages/ContabilidadePage"));
 
 function RouteLoading() {
   return (
@@ -51,6 +52,7 @@ export default function AppRoutes() {
             <Route path="/financeiro" component={FinanceiroDashboardPage} />
             <Route path="/despesas" component={DespesasPage} />
             <Route path="/comissoes" component={ComissoesPage} />
+            <Route path="/contabilidade" component={ContabilidadePage} />
             <Route path="/dashboard-caixa" component={DashboardCaixaPage} />
             <Route path="/relatorios" component={RelatoriosPage} />
             <Route path="/backup" component={BackupPage} />
