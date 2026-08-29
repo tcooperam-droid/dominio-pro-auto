@@ -3,6 +3,7 @@ import { appointmentsStore } from "@/features/agenda";
 import { employeesStore } from "@/features/funcionarios";
 import { expensesStore } from "@/features/financeiro";
 import { isFinancialAppointment, toNum } from "@/lib/analytics";
+import { localDateKey } from "@/lib/agentSchedule";
 import type { AccountingAssignment, AccountingCompany, AccountingExportRecord, AccountingMembership, AccountingProductionRow } from "./types";
 import type { Appointment, Employee } from "@/lib/store/types";
 
@@ -80,16 +81,35 @@ export const accountingStore = {
     return membershipRow(data);
   },
 
+  async closeMembership(id: string, validUntil: string): Promise<AccountingMembership> {
+    const { data, error } = await supabase
+      .from("accounting_company_memberships")
+      .update({ valid_until: validUntil })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return membershipRow(data);
+  },
+
   async syncAssignments(appointments: Appointment[], memberships: AccountingMembership[]): Promise<AccountingAssignment[]> {
-    const employeeToCompany = new Map(memberships.map(m => [m.employeeId, m.companyId]));
+    const existing = await this.listAssignments();
+    const existingIds = new Set(existing.map(assignment => assignment.appointmentId));
     const rows = appointments
       .filter(a => !a.notes?.startsWith("__DOMINIO_TIME_BLOCK__"))
-      .map(a => ({ appointment_id: a.id, employee_id: a.employeeId, company_id: employeeToCompany.get(a.employeeId) }))
-      .filter((row): row is { appointment_id: number; employee_id: number; company_id: string } => Boolean(row.company_id));
-    if (!rows.length) return [];
-    const { data, error } = await supabase.from("accounting_appointment_assignments").upsert(rows, { onConflict: "appointment_id" }).select();
+      .filter(a => !existingIds.has(a.id))
+      .map(a => {
+        const date = localDateKey(a.startTime) ?? "";
+        const membership = memberships
+          .filter(item => item.employeeId === a.employeeId && item.validFrom <= date && (!item.validUntil || item.validUntil >= date))
+          .sort((left, right) => right.validFrom.localeCompare(left.validFrom))[0];
+        return membership ? { appointment_id: a.id, employee_id: a.employeeId, company_id: membership.companyId } : null;
+      })
+      .filter((row): row is { appointment_id: number; employee_id: number; company_id: string } => Boolean(row));
+    if (!rows.length) return existing;
+    const { data, error } = await supabase.from("accounting_appointment_assignments").insert(rows).select();
     if (error) throw error;
-    return (data ?? []).map(assignmentRow);
+    return [...existing, ...(data ?? []).map(assignmentRow)];
   },
 
   async listAssignments(): Promise<AccountingAssignment[]> {

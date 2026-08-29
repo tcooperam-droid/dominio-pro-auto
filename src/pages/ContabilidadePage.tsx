@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { accountingStore } from "@/lib/accounting/store";
 import { downloadText, productionToCsv } from "@/lib/accounting/exports";
-import type { AccountingCompany, AccountingProductionRow } from "@/lib/accounting/types";
+import type { AccountingCompany, AccountingMembership, AccountingProductionRow } from "@/lib/accounting/types";
 import { employeesStore } from "@/features/funcionarios";
 import { appointmentsStore } from "@/features/agenda";
 import type { Employee } from "@/lib/store/types";
@@ -48,6 +48,10 @@ export default function ContabilidadePage() {
   const [companyId, setCompanyId] = useState("all");
   const [companies, setCompanies] = useState<AccountingCompany[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [memberships, setMemberships] = useState<AccountingMembership[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [membershipStart, setMembershipStart] = useState(firstOfAccountingPeriod);
   const [rows, setRows] = useState<AccountingProductionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -73,19 +77,22 @@ export default function ContabilidadePage() {
         }
         currentCompanies = await accountingStore.listCompanies();
       }
-      const memberships = await accountingStore.listMemberships();
+      let currentMemberships = await accountingStore.listMemberships();
       for (const company of INITIAL_COMPANIES) {
         const saved = currentCompanies.find(item => item.cnpj === company.cnpj);
         if (!saved) continue;
         for (const wantedName of company.employees) {
           const employee = currentEmployees.find(item => matchesEmployee(item, wantedName));
-          if (employee && !memberships.some(m => m.companyId === saved.id && m.employeeId === employee.id)) {
+          if (employee && !currentMemberships.some(m => m.companyId === saved.id && m.employeeId === employee.id)) {
             await accountingStore.createMembership({ companyId: saved.id, employeeId: employee.id, validFrom: "2026-01-01" });
+            currentMemberships = await accountingStore.listMemberships();
           }
         }
       }
+      currentMemberships = await accountingStore.listMemberships();
       const production = await accountingStore.loadProduction(appliedStart, appliedEnd, companyId === "all" ? undefined : companyId);
       setCompanies(production.companies);
+      setMemberships(currentMemberships);
       setRows(production.rows);
     } catch (cause: any) {
       setError(cause?.message ?? "Não foi possível carregar o módulo contábil.");
@@ -95,6 +102,44 @@ export default function ContabilidadePage() {
   };
 
   useEffect(() => { void load(); }, [appliedStart, appliedEnd, companyId]);
+
+  const addMembership = async () => {
+    const employeeId = Number(selectedEmployeeId);
+    if (!selectedCompanyId || !employeeId || !membershipStart) {
+      toast.error("Escolha a empresa, o funcionário e a data de início.");
+      return;
+    }
+    const openMembership = memberships.find(item => item.employeeId === employeeId && !item.validUntil);
+    if (openMembership) {
+      toast.error("Este funcionário já possui um vínculo aberto. Encerre o vínculo atual antes de transferi-lo.");
+      return;
+    }
+    try {
+      await accountingStore.createMembership({ companyId: selectedCompanyId, employeeId, validFrom: membershipStart });
+      toast.success("Vínculo contábil adicionado.");
+      setSelectedEmployeeId("");
+      await load();
+    } catch (cause: any) {
+      toast.error(cause?.message ?? "Não foi possível adicionar o vínculo.");
+    }
+  };
+
+  const removeMembership = async (membership: AccountingMembership) => {
+    const defaultEnd = new Date().toISOString().slice(0, 10);
+    const validUntil = window.prompt("Informe a data final do vínculo (AAAA-MM-DD):", defaultEnd);
+    if (!validUntil) return;
+    if (validUntil < membership.validFrom) {
+      toast.error("A data final não pode ser anterior à data inicial.");
+      return;
+    }
+    try {
+      await accountingStore.closeMembership(membership.id, validUntil);
+      toast.success("Vínculo encerrado. O histórico anterior foi preservado.");
+      await load();
+    } catch (cause: any) {
+      toast.error(cause?.message ?? "Não foi possível encerrar o vínculo.");
+    }
+  };
 
   const applyPeriod = () => {
     if (!start || !end) return;
@@ -145,8 +190,15 @@ export default function ContabilidadePage() {
         </section>
 
         <section className="rounded-xl border bg-card p-4">
-          <h2 className="text-lg font-semibold">Empresas configuradas</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">{companies.map(company => <div key={company.id} className="rounded-lg border p-3"><p className="font-medium">{company.name}</p><p className="text-sm text-muted-foreground">CNPJ: {company.cnpj}</p><p className="text-sm text-muted-foreground">Vínculos gerenciados no módulo contábil desde 01/01/2026.</p></div>)}</div>
+          <h2 className="text-lg font-semibold">Empresas e vínculos contábeis</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Adicione ou encerre vínculos aqui. Isso não exclui funcionários nem altera agendamentos.</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_180px_auto] md:items-end">
+            <label className="text-sm">Empresa<select value={selectedCompanyId} onChange={event => setSelectedCompanyId(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2"><option value="">Escolher empresa</option>{companies.map(company => <option key={company.id} value={company.id}>{company.name}</option>)}</select></label>
+            <label className="text-sm">Funcionário<select value={selectedEmployeeId} onChange={event => setSelectedEmployeeId(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2"><option value="">Escolher funcionário</option>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>
+            <label className="text-sm">Início do vínculo<input type="date" value={membershipStart} onChange={event => setMembershipStart(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2" /></label>
+            <button onClick={() => void addMembership()} className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground">Adicionar vínculo</button>
+          </div>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">{companies.map(company => <div key={company.id} className="rounded-lg border p-3"><p className="font-medium">{company.name}</p><p className="text-sm text-muted-foreground">CNPJ: {company.cnpj}</p><div className="mt-3 space-y-2">{memberships.filter(membership => membership.companyId === company.id).map(membership => { const employee = employees.find(item => item.id === membership.employeeId); return <div key={membership.id} className="flex items-center justify-between gap-2 rounded-md bg-muted/30 px-3 py-2 text-sm"><div><p className="font-medium">{employee?.name ?? `Funcionário #${membership.employeeId}`}</p><p className="text-xs text-muted-foreground">Desde {formatDate(membership.validFrom)}{membership.validUntil ? ` até ${formatDate(membership.validUntil)}` : " · ativo"}</p></div>{!membership.validUntil && <button onClick={() => void removeMembership(membership)} className="rounded-md border px-2 py-1 text-xs text-destructive">Remover vínculo</button>}</div>; })}</div></div>)}</div>
         </section>
 
         <section className="overflow-hidden rounded-xl border bg-card">
