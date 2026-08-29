@@ -8,7 +8,7 @@ import { appointmentsStore } from "@/features/agenda";
 import type { Employee } from "@/lib/store/types";
 
 const INITIAL_COMPANIES = [
-  { name: "Rosa de Sarom1", cnpj: "12787723000161", employees: ["Ricardo", "Bruna"] },
+  { name: "Rosa de Sarom1", cnpj: "12787723000161", employees: ["Ricardo", "Bruna", "Taiane"] },
   { name: "Rosa de Sarom2", cnpj: "17711263000101", employees: ["Ariene", "Monalisa"] },
 ];
 
