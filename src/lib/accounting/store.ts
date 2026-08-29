@@ -2,6 +2,7 @@ import { supabase, ensureSupabaseSession } from "@/lib/supabase";
 import { appointmentsStore } from "@/features/agenda";
 import { employeesStore } from "@/features/funcionarios";
 import { expensesStore } from "@/features/financeiro";
+import { isFinancialAppointment, toNum } from "@/lib/analytics";
 import type { AccountingAssignment, AccountingCompany, AccountingExportRecord, AccountingMembership, AccountingProductionRow } from "./types";
 import type { Appointment, Employee } from "@/lib/store/types";
 
@@ -103,7 +104,9 @@ export const accountingStore = {
     const [companies, memberships] = await Promise.all([
       this.listCompanies(), this.listMemberships(),
     ]);
-    const appointments = appointmentsStore.list({ startDate: start, endDate: end });
+    const appointments = appointmentsStore
+      .list({ startDate: start, endDate: end })
+      .filter(isFinancialAppointment);
     const employees = employeesStore.list(true);
     await this.syncAssignments(appointments, memberships);
     const assignments = await this.listAssignments();
@@ -115,7 +118,7 @@ export const accountingStore = {
       .map(appointment => {
         const assignment = assignmentMap.get(appointment.id);
         const company = assignment ? companyMap.get(assignment.companyId) : undefined;
-        return company ? { appointment, employee: employeeMap.get(appointment.employeeId) ?? null, company, services: appointment.services, grossValue: appointment.totalPrice ?? appointment.services.reduce((sum, service) => sum + service.price, 0) } : null;
+        return company ? { appointment, employee: employeeMap.get(appointment.employeeId) ?? null, company, services: appointment.services, grossValue: toNum(appointment.totalPrice) } : null;
       })
       .filter((row): row is AccountingProductionRow => Boolean(row && (!companyId || row.company.id === companyId)));
     return { rows, companies, employees };

@@ -35,7 +35,9 @@ function matchesEmployee(employee: Employee, wantedName: string) {
 }
 
 function formatDate(value: string) {
-  return new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR");
+  const dateKey = value.includes("T") ? value.slice(0, 10) : value.slice(0, 10);
+  const parsed = new Date(`${dateKey}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString("pt-BR");
 }
 
 export default function ContabilidadePage() {
