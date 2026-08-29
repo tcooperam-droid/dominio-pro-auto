@@ -62,7 +62,9 @@ export default function ContabilidadePage() {
         employeesStore.fetchAll(),
         appointmentsStore.fetchAll(),
       ]);
-      const currentEmployees = loadedEmployees.filter(employee => employee.active);
+      // Vínculos históricos também precisam incluir colaboradores atualmente
+      // inativos, pois o período contábil começa em janeiro de 2026.
+      const currentEmployees = loadedEmployees;
       setEmployees(currentEmployees);
       let currentCompanies = await accountingStore.listCompanies();
       if (!currentCompanies.length) {

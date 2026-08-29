@@ -107,7 +107,8 @@ export const accountingStore = {
     const appointments = appointmentsStore
       .list({ startDate: start, endDate: end })
       .filter(isFinancialAppointment);
-    const employees = employeesStore.list(true);
+    // O período histórico pode conter colaboradores que hoje estão inativos.
+    const employees = employeesStore.list();
     await this.syncAssignments(appointments, memberships);
     const assignments = await this.listAssignments();
     const assignmentMap = new Map(assignments.map(a => [a.appointmentId, a]));
