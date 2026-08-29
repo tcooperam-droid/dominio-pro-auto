@@ -847,6 +847,7 @@ export default function AgendaPage() {
   // ── Modal helpers ─────────────────────────────────────────────────────────
   const openNew = useCallback((empId: number, hour: number, minute = 0) => {
     capturePending();
+    setShowPackages(false);
     setEditingAppt(null);
     setDefaultEmpId(empId);
     setDefaultHour(hour);
@@ -857,6 +858,7 @@ export default function AgendaPage() {
   }, [capturePending]);
 
   const openEdit = useCallback((appt: Appointment) => {
+    setShowPackages(false);
     if (isTimeBlock(appt)) {
       capturePending();
       setEditingBlock(appt);
@@ -893,6 +895,7 @@ export default function AgendaPage() {
 
   const completedCount = appointments.filter(a => a.status === "completed").length;
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showPackages, setShowPackages] = useState(false);
 
   return (
     <div className="flex flex-col h-full" style={{ userSelect: dragging ? "none" : undefined }}>
@@ -1002,7 +1005,7 @@ export default function AgendaPage() {
           </Badge>
           <Button
             size="sm"
-            onClick={() => { capturePending(); setEditingAppt(null); setDefaultEmpId(undefined); setGroupClientName(undefined); setGroupId(undefined); setModalOpen(true); }}
+            onClick={() => { capturePending(); setShowPackages(true); setEditingAppt(null); setDefaultEmpId(undefined); setGroupClientName(undefined); setGroupId(undefined); setModalOpen(true); }}
             className="gap-1 h-8 text-xs md:text-sm"
           >
             <Plus className="w-3 h-3" />
@@ -1105,6 +1108,7 @@ export default function AgendaPage() {
         selectedDate={selectedDate}
         groupClientName={groupClientName}
         groupId={groupId}
+        showPackages={showPackages}
         onSuccess={() => {
           commitSnapshot();
           setRefreshKey(k => k + 1);
