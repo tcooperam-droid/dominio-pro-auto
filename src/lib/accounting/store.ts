@@ -31,9 +31,28 @@ const assignmentRow = (row: any): AccountingAssignment => ({
 export const accountingStore = {
   async listCompanies(): Promise<AccountingCompany[]> {
     await ensureSupabaseSession();
-    const { data, error } = await supabase.from("accounting_companies").select("*").order("name");
+    const [{ data, error }, { data: membershipRows, error: membershipError }] = await Promise.all([
+      supabase.from("accounting_companies").select("*").order("name"),
+      supabase.from("accounting_company_memberships").select("company_id"),
+    ]);
     if (error) throw error;
-    return (data ?? []).map(companyRow);
+    if (membershipError) throw membershipError;
+
+    // Registros antigos podem ter sido criados antes da restrição UNIQUE do
+    // schema. Deduplicate na leitura sem tocar nas tabelas existentes.
+    const membershipCount = new Map<string, number>();
+    for (const row of membershipRows ?? []) {
+      membershipCount.set(row.company_id, (membershipCount.get(row.company_id) ?? 0) + 1);
+    }
+    const canonicalByCnpj = new Map<string, any>();
+    for (const row of data ?? []) {
+      const key = String(row.cnpj).replace(/\D/g, "");
+      const current = canonicalByCnpj.get(key);
+      if (!current || (membershipCount.get(row.id) ?? 0) > (membershipCount.get(current.id) ?? 0)) {
+        canonicalByCnpj.set(key, row);
+      }
+    }
+    return [...canonicalByCnpj.values()].map(companyRow);
   },
 
   async listMemberships(): Promise<AccountingMembership[]> {

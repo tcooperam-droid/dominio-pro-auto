@@ -4,6 +4,7 @@ import { accountingStore } from "@/lib/accounting/store";
 import { downloadText, productionToCsv } from "@/lib/accounting/exports";
 import type { AccountingCompany, AccountingProductionRow } from "@/lib/accounting/types";
 import { employeesStore } from "@/features/funcionarios";
+import { appointmentsStore } from "@/features/agenda";
 import type { Employee } from "@/lib/store/types";
 
 const INITIAL_COMPANIES = [
@@ -16,6 +17,21 @@ const firstOfAccountingPeriod = "2026-01-01";
 
 function formatMoney(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function normalizeName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function matchesEmployee(employee: Employee, wantedName: string) {
+  const actual = normalizeName(employee.name);
+  const wanted = normalizeName(wantedName);
+  return actual === wanted || actual.startsWith(`${wanted} `);
 }
 
 function formatDate(value: string) {
@@ -38,7 +54,13 @@ export default function ContabilidadePage() {
     setLoading(true);
     setError(null);
     try {
-      const currentEmployees = employeesStore.list(true);
+      // A tela pode ser aberta antes do bootstrap global terminar. Faça a
+      // hidratação explícita para que a agenda continue sendo a fonte da verdade.
+      const [loadedEmployees] = await Promise.all([
+        employeesStore.fetchAll(),
+        appointmentsStore.fetchAll(),
+      ]);
+      const currentEmployees = loadedEmployees.filter(employee => employee.active);
       setEmployees(currentEmployees);
       let currentCompanies = await accountingStore.listCompanies();
       if (!currentCompanies.length) {
@@ -52,7 +74,7 @@ export default function ContabilidadePage() {
         const saved = currentCompanies.find(item => item.cnpj === company.cnpj);
         if (!saved) continue;
         for (const wantedName of company.employees) {
-          const employee = currentEmployees.find(item => item.name.trim().toLowerCase() === wantedName.toLowerCase());
+          const employee = currentEmployees.find(item => matchesEmployee(item, wantedName));
           if (employee && !memberships.some(m => m.companyId === saved.id && m.employeeId === employee.id)) {
             await accountingStore.createMembership({ companyId: saved.id, employeeId: employee.id, validFrom: "2026-01-01" });
           }
