@@ -64,6 +64,7 @@ interface AppointmentModalProps {
   groupId?: string;
   onSuccess: () => void;
   onAddGroupService?: (clientName: string, groupId: string) => void;
+  showPackages?: boolean;
 }
 
 const newGroupId = () => `grp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -80,6 +81,7 @@ export default function AppointmentModal({
   groupId: incomingGroupId,
   onSuccess,
   onAddGroupService,
+  showPackages = false,
 }: AppointmentModalProps) {
   const isEditing = !!appointment;
   const storeVersion = useStoreVersion();
@@ -692,7 +694,7 @@ export default function AppointmentModal({
               <Label>Serviços *</Label>
               <span className="text-[10px] text-muted-foreground">Preço atual do cadastro</span>
             </div>
-            {packagesData.length > 0 && (
+            {showPackages && packagesData.length > 0 && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5 space-y-2">
                 <div className="flex items-center gap-2"><Package className="h-3.5 w-3.5 text-primary" /><p className="text-xs font-semibold text-primary">Pacotes rápidos</p></div>
                 <div className="grid grid-cols-1 gap-1.5">
