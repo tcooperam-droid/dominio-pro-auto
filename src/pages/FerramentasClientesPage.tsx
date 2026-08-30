@@ -247,6 +247,7 @@ export default function FerramentasClientesPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [mergeDetailGroup, setMergeDetailGroup] = useState<string | null>(null);
+  const [mergeSuggestedPair, setMergeSuggestedPair] = useState<PossibleMergePair | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vcfInputRef  = useRef<HTMLInputElement>(null);
   const storeVersion = useStoreVersion();
@@ -336,9 +337,7 @@ export default function FerramentasClientesPage() {
 
   // ─── Lógica de Mesclagem Corrigida ────────────────────────
 
-  const executeMerge = async (key: string) => {
-    const group = duplicateGroups.get(key);
-    if (!group) return;
+  const executeMergeClients = async (group: Client[]) => {
     const { keep, removeIds } = mergeClientGroup(group);
 
     // 1. Reatribuir agendamentos primeiro (Evita órfãos)
@@ -357,6 +356,21 @@ export default function FerramentasClientesPage() {
 
     // 3. Remover as duplicatas
     await Promise.all(removeIds.map(id => clientsStore.delete(id)));
+  };
+
+  const executeMerge = async (key: string) => {
+    const group = duplicateGroups.get(key);
+    if (group) await executeMergeClients(group);
+  };
+
+  const handleMergeSuggestedPair = async () => {
+    if (!mergeSuggestedPair) return;
+    try {
+      await executeMergeClients([mergeSuggestedPair.left, mergeSuggestedPair.right]);
+      toast.success("Clientes mesclados com sucesso.");
+      setMergeSuggestedPair(null);
+      refresh();
+    } catch { toast.error("Erro ao mesclar os clientes sugeridos."); }
   };
 
   const handleMergeGroup = async (key: string) => {
@@ -458,7 +472,7 @@ export default function FerramentasClientesPage() {
               <div key={`${left.id}-${right.id}`} className="border-b last:border-0 border-border p-4 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2"><Badge variant={probability.label === "Muito alta" ? "destructive" : "secondary"}>{probability.label}</Badge><span className="text-xs text-muted-foreground">{probability.score}% de probabilidade</span></div>
-                  <span className="text-xs text-muted-foreground">{probability.reason}</span>
+                  <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{probability.reason}</span><Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setMergeSuggestedPair({ left, right, probability })}><Merge className="w-3 h-3" /> Revisar e mesclar</Button></div>
                 </div>
                 <div className="grid gap-2 md:grid-cols-2">
                   {[left, right].map(client => <div key={client.id} className="rounded-lg bg-secondary/30 p-3"><p className="text-sm font-medium">#{client.id} — {client.name}</p><p className="text-xs text-muted-foreground">Telefone: {client.phone || "não informado"} · E-mail: {client.email || "não informado"}</p></div>)}
@@ -549,6 +563,18 @@ export default function FerramentasClientesPage() {
         </DialogContent>
       </Dialog>
       
+      {/* Modal Mesclagem de Sugestão */}
+      <Dialog open={!!mergeSuggestedPair} onOpenChange={() => setMergeSuggestedPair(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Revisar possível mescla</DialogTitle></DialogHeader>
+          {mergeSuggestedPair && <>
+            <p className="text-sm text-muted-foreground">Probabilidade {mergeSuggestedPair.probability.score}% ({mergeSuggestedPair.probability.reason}). O cadastro mais antigo será mantido, os agendamentos serão transferidos e o outro cadastro será excluído. Esta ação não pode ser desfeita.</p>
+            <div className="space-y-2 rounded-lg bg-secondary/30 p-3 text-sm"><p><strong>Será mantido:</strong> #{[mergeSuggestedPair.left, mergeSuggestedPair.right].sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0].id}</p><p>{mergeSuggestedPair.left.name} / {mergeSuggestedPair.right.name}</p></div>
+          </>}
+          <DialogFooter><Button variant="outline" onClick={() => setMergeSuggestedPair(null)}>Cancelar</Button><Button onClick={handleMergeSuggestedPair} className="bg-amber-600 hover:bg-amber-700"><Merge className="mr-2" />Confirmar mesclagem</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Modal Mesclagem Individual */}
       <Dialog open={!!mergeDetailGroup} onOpenChange={() => setMergeDetailGroup(null)}>
         <DialogContent className="max-w-md">
