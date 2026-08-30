@@ -36,9 +36,27 @@ function matchesEmployee(employee: Employee, wantedName: string) {
 }
 
 function formatDate(value: string) {
-  const dateKey = value.includes("T") ? value.slice(0, 10) : value.slice(0, 10);
+  const dateKey = value.slice(0, 10);
   const parsed = new Date(`${dateKey}T12:00:00`);
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString("pt-BR");
+}
+
+function calendarDays(start: string, end: string) {
+  const from = new Date(`${start}T12:00:00`).getTime();
+  const to = new Date(`${end}T12:00:00`).getTime();
+  return Math.max(1, Math.floor((to - from) / 86400000) + 1);
+}
+
+function addDays(date: string, days: number) {
+  const result = new Date(`${date}T12:00:00`);
+  result.setDate(result.getDate() + days);
+  return result.toISOString().slice(0, 10);
+}
+
+function projectionPeriod(month: number) {
+  const start = month === 1 ? "2026-01-15" : "2026-02-01";
+  const end = month === 1 ? "2026-01-31" : "2026-02-28";
+  return { start, end, label: month === 1 ? "Janeiro/2026" : "Fevereiro/2026" };
 }
 
 export default function ContabilidadePage() {
@@ -54,6 +72,7 @@ export default function ContabilidadePage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [membershipStart, setMembershipStart] = useState(firstOfAccountingPeriod);
   const [rows, setRows] = useState<AccountingProductionRow[]>([]);
+  const [referenceRows, setReferenceRows] = useState<AccountingProductionRow[]>([]);
   const [unassignedCount, setUnassignedCount] = useState(0);
   const [unassignedEmployees, setUnassignedEmployees] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +116,8 @@ export default function ContabilidadePage() {
       }
       currentMemberships = await accountingStore.listMemberships();
       const production = await accountingStore.loadProduction(appliedStart, appliedEnd, companyId === "all" ? undefined : companyId);
+      const referenceEnd = isoToday >= "2026-03-01" ? isoToday : "2026-03-01";
+      const referenceProduction = await accountingStore.loadProduction("2026-03-01", referenceEnd, companyId === "all" ? undefined : companyId);
       const validAppointments = appointmentsStore.list({ startDate: appliedStart, endDate: appliedEnd }).filter(isFinancialAppointment);
       const classifiedIds = new Set(production.rows.map(row => row.appointment.id));
       const missingAppointments = validAppointments.filter(appointment => !classifiedIds.has(appointment.id));
@@ -107,6 +128,7 @@ export default function ContabilidadePage() {
       setCompanies(production.companies);
       setMemberships(currentMemberships);
       setRows(production.rows);
+      setReferenceRows(referenceProduction.rows);
       setUnassignedCount(companyId === "all" ? missingAppointments.length : 0);
       setUnassignedEmployees(companyId === "all" ? employeeNames : []);
     } catch (cause: any) {
@@ -172,6 +194,26 @@ export default function ContabilidadePage() {
     value: rows.reduce((sum, row) => sum + row.grossValue, 0),
   }), [rows]);
 
+  const projections = useMemo(() => {
+    if (!referenceRows.length) return [];
+    const referenceEnd = isoToday >= "2026-03-01" ? isoToday : "2026-03-01";
+    const observedDays = calendarDays("2026-03-01", referenceEnd);
+    const byProfessional = new Map<string, { employee: string; company: string; appointments: number; services: number; value: number }>();
+    for (const row of referenceRows) {
+      const key = `${row.company.id}:${row.employee?.id ?? "unknown"}`;
+      const current = byProfessional.get(key) ?? { employee: row.employee?.name ?? "Sem colaborador", company: row.company.name, appointments: 0, services: 0, value: 0 };
+      current.appointments += 1;
+      current.services += row.services.length;
+      current.value += row.grossValue;
+      byProfessional.set(key, current);
+    }
+    return [1, 2].map(month => {
+      const period = projectionPeriod(month);
+      const days = calendarDays(period.start, period.end);
+      return { ...period, rows: [...byProfessional.values()].map(item => ({ ...item, appointments: Math.round(item.appointments / observedDays * days), services: Math.round(item.services / observedDays * days), value: item.value / observedDays * days })).filter(item => item.appointments > 0 || item.services > 0 || item.value > 0) };
+    });
+  }, [referenceRows]);
+
   const exportCsv = async () => {
     if (!rows.length) return;
     downloadText(`producao-prevista-${appliedStart}-${appliedEnd}.csv`, productionToCsv(rows));
@@ -205,6 +247,12 @@ export default function ContabilidadePage() {
             <div className="flex gap-2"><button onClick={applyPeriod} disabled={loading} className="rounded-md border px-4 py-2 font-medium disabled:opacity-50">Aplicar período</button><button onClick={() => void exportCsv()} disabled={!rows.length || loading} className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">Exportar CSV</button></div>
           </div>
         </section>
+
+        {projections.length > 0 && <section className="rounded-xl border border-blue-400/40 bg-blue-500/5 p-4">
+          <h2 className="text-lg font-semibold">Projeção provável — janeiro e fevereiro/2026</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Estimativa calculada pela média diária observada por profissional a partir de março. Janeiro considera somente 15 a 31/01; fevereiro considera 01 a 28/02. Estes valores não substituem os dados reais da Agenda.</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">{projections.map(projection => { const total = projection.rows.reduce((sum, row) => sum + row.value, 0); const appointments = projection.rows.reduce((sum, row) => sum + row.appointments, 0); const services = projection.rows.reduce((sum, row) => sum + row.services, 0); return <div key={projection.label} className="rounded-lg border bg-card p-4"><div className="flex items-center justify-between"><h3 className="font-medium">{projection.label}</h3><span className="rounded-full bg-blue-500/15 px-2 py-1 text-xs text-blue-300">Estimativa</span></div><div className="mt-3 grid grid-cols-3 gap-2 text-sm"><div><p className="text-muted-foreground">Atend.</p><p className="font-semibold">{appointments}</p></div><div><p className="text-muted-foreground">Serviços</p><p className="font-semibold">{services}</p></div><div><p className="text-muted-foreground">Valor</p><p className="font-semibold">{formatMoney(total)}</p></div></div><div className="mt-4 space-y-2">{projection.rows.map(row => <div key={`${projection.label}-${row.company}-${row.employee}`} className="flex items-center justify-between gap-3 border-t pt-2 text-sm"><div><p className="font-medium">{row.employee}</p><p className="text-xs text-muted-foreground">{row.company}</p></div><div className="text-right"><p>{row.appointments} atend. · {row.services} serv.</p><p className="font-medium">{formatMoney(row.value)}</p></div></div>)}</div></div>; })}</div>
+        </section>}
 
         <section className="rounded-xl border bg-card p-4">
           <h2 className="text-lg font-semibold">Empresas e vínculos contábeis</h2>
