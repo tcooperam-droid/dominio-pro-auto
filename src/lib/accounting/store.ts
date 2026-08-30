@@ -144,7 +144,15 @@ export const accountingStore = {
       .filter(a => a.status !== "cancelled")
       .map(appointment => {
         const assignment = assignmentMap.get(appointment.id);
-        const company = assignment ? companyMap.get(assignment.companyId) : undefined;
+        const date = localDateKey(appointment.startTime) ?? "";
+        const fallbackMembership = memberships
+          .filter(item => item.employeeId === appointment.employeeId && item.validFrom <= date && (!item.validUntil || item.validUntil >= date))
+          .sort((left, right) => right.validFrom.localeCompare(left.validFrom))[0];
+        // Se uma classificação antiga apontar para uma empresa duplicada que
+        // foi ocultada pela deduplicação, recuperamos a empresa pelo vínculo
+        // histórico do colaborador em vez de perder o atendimento.
+        const company = (assignment ? companyMap.get(assignment.companyId) : undefined)
+          ?? (fallbackMembership ? companyMap.get(fallbackMembership.companyId) : undefined);
         return company ? { appointment, employee: employeeMap.get(appointment.employeeId) ?? null, company, services: appointment.services, grossValue: toNum(appointment.totalPrice) } : null;
       })
       .filter((row): row is AccountingProductionRow => Boolean(row && (!companyId || row.company.id === companyId)));
