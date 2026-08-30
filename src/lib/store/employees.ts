@@ -81,7 +81,8 @@ export const employeesStore = {
   async delete(id: number): Promise<void> {
     const emp = cache.employees.find(e => e.id === id);
 
-    await supabase.from("employees").delete().eq("id", id);
+    const { error } = await supabase.from("employees").delete().eq("id", id);
+    if (error) throw error;
 
     cache.employees = cache.employees.filter(e => e.id !== id);
     window.dispatchEvent(new Event("store_updated"));
