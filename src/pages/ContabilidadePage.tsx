@@ -77,6 +77,9 @@ export default function ContabilidadePage() {
         }
         currentCompanies = await accountingStore.listCompanies();
       }
+      // Exibe as empresas antes das etapas de vínculos e produção. Assim,
+      // uma falha posterior não deixa a seção de empresas visualmente vazia.
+      setCompanies(currentCompanies);
       let currentMemberships = await accountingStore.listMemberships();
       for (const company of INITIAL_COMPANIES) {
         const saved = currentCompanies.find(item => item.cnpj === company.cnpj);

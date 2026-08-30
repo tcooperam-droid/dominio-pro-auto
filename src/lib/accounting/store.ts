@@ -38,7 +38,9 @@ export const accountingStore = {
       supabase.from("accounting_company_memberships").select("company_id"),
     ]);
     if (error) throw error;
-    if (membershipError) throw membershipError;
+    // Se a consulta de vínculos falhar, ainda exibimos as empresas; a
+    // sincronização poderá ser repetida sem esconder o cadastro principal.
+    if (membershipError) console.warn("Falha ao consultar vínculos contábeis:", membershipError);
 
     // Registros antigos podem ter sido criados antes da restrição UNIQUE do
     // schema. Deduplicate na leitura sem tocar nas tabelas existentes.
