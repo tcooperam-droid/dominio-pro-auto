@@ -339,23 +339,41 @@ export default function FerramentasClientesPage() {
 
   const executeMergeClients = async (group: Client[]) => {
     const { keep, removeIds } = mergeClientGroup(group);
-
-    // 1. Reatribuir agendamentos primeiro (Evita órfãos)
     const allAppts = appointmentsStore.list({});
     const apptsToUpdate = allAppts.filter(a => a.clientId != null && removeIds.includes(a.clientId));
-    
-    await Promise.all(apptsToUpdate.map(a => 
-      appointmentsStore.update(a.id, { clientId: keep.id, clientName: keep.name })
-    ));
+    const updatedAppts: typeof apptsToUpdate = [];
 
-    // 2. Atualizar o cadastro master com os dados combinados
-    await clientsStore.update(keep.id, {
-      email: keep.email, phone: keep.phone, birthDate: keep.birthDate,
-      cpf: keep.cpf, address: keep.address, notes: keep.notes
-    });
+    try {
+      // 1. Transferir um agendamento por vez e guardar o estado anterior.
+      // A exclusão só acontece depois que todas as transferências e a
+      // atualização do cadastro principal forem concluídas.
+      for (const appointment of apptsToUpdate) {
+        await appointmentsStore.update(appointment.id, { clientId: keep.id, clientName: keep.name });
+        updatedAppts.push(appointment);
+      }
 
-    // 3. Remover as duplicatas
-    await Promise.all(removeIds.map(id => clientsStore.delete(id)));
+      // 2. Combinar todos os campos não vazios no cadastro mais antigo.
+      await clientsStore.update(keep.id, {
+        name: keep.name, email: keep.email, phone: keep.phone, birthDate: keep.birthDate,
+        cpf: keep.cpf, address: keep.address, notes: keep.notes,
+      });
+
+      // 3. Para pares sugeridos há apenas um duplicado. Ele só é removido
+      // depois de todas as etapas anteriores terem sido confirmadas.
+      for (const id of removeIds) await clientsStore.delete(id);
+    } catch (error) {
+      // Se algo falhar antes da exclusão, restaura os agendamentos já movidos.
+      // O cadastro duplicado permanece no banco, portanto nenhuma informação
+      // fica sem uma cópia disponível.
+      for (const appointment of updatedAppts.reverse()) {
+        try {
+          await appointmentsStore.update(appointment.id, { clientId: appointment.clientId, clientName: appointment.clientName });
+        } catch {
+          // Mantém o erro original; a operação não prossegue para exclusões.
+        }
+      }
+      throw error;
+    }
   };
 
   const executeMerge = async (key: string) => {
