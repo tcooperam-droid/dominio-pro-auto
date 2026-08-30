@@ -34,6 +34,45 @@ function normalizeName(name: string): string {
     .trim();
 }
 
+function normalizePhone(phone: string | null): string {
+  return (phone || "").replace(/\D/g, "");
+}
+
+function nameSimilarity(a: string, b: string): number {
+  const left = normalizeName(a);
+  const right = normalizeName(b);
+  if (!left || !right) return 0;
+  const matrix = Array.from({ length: left.length + 1 }, (_, i) => Array.from({ length: right.length + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
+  for (let i = 1; i <= left.length; i++) for (let j = 1; j <= right.length; j++) {
+    matrix[i][j] = left[i - 1] === right[j - 1]
+      ? matrix[i - 1][j - 1]
+      : 1 + Math.min(matrix[i - 1][j], matrix[i][j - 1], matrix[i - 1][j - 1]);
+  }
+  return 1 - matrix[left.length][right.length] / Math.max(left.length, right.length);
+}
+
+function mergeProbability(a: Client, b: Client): { label: string; score: number; reason: string } | null {
+  const phoneA = normalizePhone(a.phone);
+  const phoneB = normalizePhone(b.phone);
+  const samePhone = phoneA.length >= 8 && phoneB.length >= 8 && phoneA.slice(-8) === phoneB.slice(-8) && new Set(phoneA).size > 2;
+  const nameScore = nameSimilarity(a.name, b.name);
+  if (samePhone && nameScore >= 0.72) return { label: "Muito alta", score: 98, reason: "Telefone coincidente e nome semelhante" };
+  if (samePhone) return { label: "Alta", score: 90, reason: "Telefone coincidente" };
+  if (nameScore >= 0.92) return { label: "Média", score: Math.round(nameScore * 100), reason: "Nome muito semelhante" };
+  return null;
+}
+
+interface PossibleMergePair { left: Client; right: Client; probability: { label: string; score: number; reason: string } }
+
+function findPossibleMergePairs(clients: Client[]): PossibleMergePair[] {
+  const pairs: PossibleMergePair[] = [];
+  for (let i = 0; i < clients.length; i++) for (let j = i + 1; j < clients.length; j++) {
+    const probability = mergeProbability(clients[i], clients[j]);
+    if (probability) pairs.push({ left: clients[i], right: clients[j], probability });
+  }
+  return pairs.sort((a, b) => b.probability.score - a.probability.score);
+}
+
 /** Agrupa clientes por nome normalizado */
 function findDuplicateGroups(clients: Client[]): Map<string, Client[]> {
   const groups = new Map<string, Client[]>();
@@ -187,6 +226,7 @@ export default function FerramentasClientesPage() {
   const clients = useMemo(() => clientsStore.list(), [refreshKey, storeVersion]);
   const duplicateGroups = useMemo(() => findDuplicateGroups(clients), [clients]);
   const duplicateGroupsArray = useMemo(() => Array.from(duplicateGroups.entries()), [duplicateGroups]);
+  const possibleMergePairs = useMemo(() => findPossibleMergePairs(clients), [clients]);
 
   const refresh = () => setRefreshKey(k => k + 1);
 
@@ -377,6 +417,29 @@ export default function FerramentasClientesPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Possíveis mesclas por probabilidade */}
+      {possibleMergePairs.length > 0 && (
+        <Card className="border-border bg-card/50">
+          <CardHeader className="pb-3 border-b">
+            <CardTitle className="text-base flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> Possíveis mesclas por probabilidade</CardTitle>
+            <p className="text-xs text-muted-foreground">Sugestões para conferência. Nenhum cliente será alterado automaticamente.</p>
+          </CardHeader>
+          <CardContent className="p-0">
+            {possibleMergePairs.map(({ left, right, probability }) => (
+              <div key={`${left.id}-${right.id}`} className="border-b last:border-0 border-border p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2"><Badge variant={probability.label === "Muito alta" ? "destructive" : "secondary"}>{probability.label}</Badge><span className="text-xs text-muted-foreground">{probability.score}% de probabilidade</span></div>
+                  <span className="text-xs text-muted-foreground">{probability.reason}</span>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {[left, right].map(client => <div key={client.id} className="rounded-lg bg-secondary/30 p-3"><p className="text-sm font-medium">#{client.id} — {client.name}</p><p className="text-xs text-muted-foreground">Telefone: {client.phone || "não informado"} · E-mail: {client.email || "não informado"}</p></div>)}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Lista de Duplicados */}
       {duplicateGroupsArray.length > 0 && (
