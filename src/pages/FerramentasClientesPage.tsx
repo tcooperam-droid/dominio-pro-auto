@@ -65,10 +65,38 @@ function mergeProbability(a: Client, b: Client): { label: string; score: number;
 interface PossibleMergePair { left: Client; right: Client; probability: { label: string; score: number; reason: string } }
 
 function findPossibleMergePairs(clients: Client[]): PossibleMergePair[] {
+  // Bloqueia candidatos por telefone ou partes do nome. Comparar todos os
+  // pares de 1.700+ clientes custaria milhões de comparações e travaria o
+  // celular antes da tela conseguir renderizar.
+  const buckets = new Map<string, number[]>();
+  const addToBucket = (key: string, index: number) => {
+    if (!key) return;
+    const list = buckets.get(key) ?? [];
+    list.push(index);
+    buckets.set(key, list);
+  };
+  clients.forEach((client, index) => {
+    const normalized = normalizeName(client.name);
+    const tokens = normalized.split(" ").filter(Boolean);
+    const phone = normalizePhone(client.phone);
+    if (phone.length >= 8 && new Set(phone).size > 2) addToBucket(`phone:${phone.slice(-8)}`, index);
+    const first = tokens[0] ?? "";
+    const last = tokens[tokens.length - 1] ?? first;
+    addToBucket(`name:${first.slice(0, 4)}:${last.slice(0, 4)}`, index);
+    addToBucket(`first:${first.slice(0, 5)}`, index);
+  });
+  const pairKeys = new Set<string>();
   const pairs: PossibleMergePair[] = [];
-  for (let i = 0; i < clients.length; i++) for (let j = i + 1; j < clients.length; j++) {
-    const probability = mergeProbability(clients[i], clients[j]);
-    if (probability) pairs.push({ left: clients[i], right: clients[j], probability });
+  for (const indexes of buckets.values()) {
+    for (let i = 0; i < indexes.length; i++) for (let j = i + 1; j < indexes.length; j++) {
+      const leftIndex = Math.min(indexes[i], indexes[j]);
+      const rightIndex = Math.max(indexes[i], indexes[j]);
+      const key = `${leftIndex}:${rightIndex}`;
+      if (pairKeys.has(key)) continue;
+      pairKeys.add(key);
+      const probability = mergeProbability(clients[leftIndex], clients[rightIndex]);
+      if (probability) pairs.push({ left: clients[leftIndex], right: clients[rightIndex], probability });
+    }
   }
   return pairs.sort((a, b) => b.probability.score - a.probability.score);
 }
