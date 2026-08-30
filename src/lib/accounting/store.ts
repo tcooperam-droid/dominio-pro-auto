@@ -109,7 +109,11 @@ export const accountingStore = {
       })
       .filter((row): row is { appointment_id: number; employee_id: number; company_id: string } => Boolean(row));
     if (!rows.length) return existing;
-    const { data, error } = await supabase.from("accounting_appointment_assignments").insert(rows).select();
+    const uniqueRows = [...new Map(rows.map(row => [row.appointment_id, row])).values()];
+    const { data, error } = await supabase
+      .from("accounting_appointment_assignments")
+      .upsert(uniqueRows, { onConflict: "appointment_id", ignoreDuplicates: true })
+      .select();
     if (error) throw error;
     return [...existing, ...(data ?? []).map(assignmentRow)];
   },
