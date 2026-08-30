@@ -2,6 +2,8 @@ import { supabase, ensureSupabaseSession } from "@/lib/supabase";
 import { appointmentsStore } from "@/features/agenda";
 import { employeesStore } from "@/features/funcionarios";
 import { expensesStore } from "@/features/financeiro";
+import { isFinancialAppointment, toNum } from "@/lib/analytics";
+import { localDateKey } from "@/lib/agentSchedule";
 import type { AccountingAssignment, AccountingCompany, AccountingExportRecord, AccountingMembership, AccountingProductionRow } from "./types";
 import type { Appointment, Employee } from "@/lib/store/types";
 
@@ -9,7 +11,7 @@ const companyRow = (row: any): AccountingCompany => ({
   id: row.id,
   name: row.name,
   cnpj: row.cnpj,
-  tradeName: row.trade_name ?? null,
+  tradeName: null,
   active: row.active !== false,
 });
 
@@ -31,9 +33,30 @@ const assignmentRow = (row: any): AccountingAssignment => ({
 export const accountingStore = {
   async listCompanies(): Promise<AccountingCompany[]> {
     await ensureSupabaseSession();
-    const { data, error } = await supabase.from("accounting_companies").select("*").order("name");
+    const [{ data, error }, { data: membershipRows, error: membershipError }] = await Promise.all([
+      supabase.from("accounting_companies").select("*").order("name"),
+      supabase.from("accounting_company_memberships").select("company_id"),
+    ]);
     if (error) throw error;
-    return (data ?? []).map(companyRow);
+    // Se a consulta de vínculos falhar, ainda exibimos as empresas; a
+    // sincronização poderá ser repetida sem esconder o cadastro principal.
+    if (membershipError) console.warn("Falha ao consultar vínculos contábeis:", membershipError);
+
+    // Registros antigos podem ter sido criados antes da restrição UNIQUE do
+    // schema. Deduplicate na leitura sem tocar nas tabelas existentes.
+    const membershipCount = new Map<string, number>();
+    for (const row of membershipRows ?? []) {
+      membershipCount.set(row.company_id, (membershipCount.get(row.company_id) ?? 0) + 1);
+    }
+    const canonicalByCnpj = new Map<string, any>();
+    for (const row of data ?? []) {
+      const key = String(row.cnpj).replace(/\D/g, "");
+      const current = canonicalByCnpj.get(key);
+      if (!current || (membershipCount.get(row.id) ?? 0) > (membershipCount.get(current.id) ?? 0)) {
+        canonicalByCnpj.set(key, row);
+      }
+    }
+    return [...canonicalByCnpj.values()].map(companyRow);
   },
 
   async listMemberships(): Promise<AccountingMembership[]> {
@@ -43,9 +66,9 @@ export const accountingStore = {
     return (data ?? []).map(membershipRow);
   },
 
-  async createCompany(input: { name: string; cnpj: string; tradeName?: string | null }): Promise<AccountingCompany> {
+  async createCompany(input: { name: string; cnpj: string }): Promise<AccountingCompany> {
     const { data, error } = await supabase.from("accounting_companies").insert({
-      name: input.name.trim(), cnpj: input.cnpj.replace(/\D/g, ""), trade_name: input.tradeName?.trim() || null,
+      name: input.name.trim(), cnpj: input.cnpj.replace(/\D/g, ""),
     }).select().single();
     if (error) throw error;
     return companyRow(data);
@@ -60,16 +83,39 @@ export const accountingStore = {
     return membershipRow(data);
   },
 
+  async closeMembership(id: string, validUntil: string): Promise<AccountingMembership> {
+    const { data, error } = await supabase
+      .from("accounting_company_memberships")
+      .update({ valid_until: validUntil })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return membershipRow(data);
+  },
+
   async syncAssignments(appointments: Appointment[], memberships: AccountingMembership[]): Promise<AccountingAssignment[]> {
-    const employeeToCompany = new Map(memberships.map(m => [m.employeeId, m.companyId]));
+    const existing = await this.listAssignments();
+    const existingIds = new Set(existing.map(assignment => assignment.appointmentId));
     const rows = appointments
       .filter(a => !a.notes?.startsWith("__DOMINIO_TIME_BLOCK__"))
-      .map(a => ({ appointment_id: a.id, employee_id: a.employeeId, company_id: employeeToCompany.get(a.employeeId) }))
-      .filter((row): row is { appointment_id: number; employee_id: number; company_id: string } => Boolean(row.company_id));
-    if (!rows.length) return [];
-    const { data, error } = await supabase.from("accounting_appointment_assignments").upsert(rows, { onConflict: "appointment_id" }).select();
+      .filter(a => !existingIds.has(a.id))
+      .map(a => {
+        const date = localDateKey(a.startTime) ?? "";
+        const membership = memberships
+          .filter(item => item.employeeId === a.employeeId && item.validFrom <= date && (!item.validUntil || item.validUntil >= date))
+          .sort((left, right) => right.validFrom.localeCompare(left.validFrom))[0];
+        return membership ? { appointment_id: a.id, employee_id: a.employeeId, company_id: membership.companyId } : null;
+      })
+      .filter((row): row is { appointment_id: number; employee_id: number; company_id: string } => Boolean(row));
+    if (!rows.length) return existing;
+    const uniqueRows = [...new Map(rows.map(row => [row.appointment_id, row])).values()];
+    const { data, error } = await supabase
+      .from("accounting_appointment_assignments")
+      .upsert(uniqueRows, { onConflict: "appointment_id", ignoreDuplicates: true })
+      .select();
     if (error) throw error;
-    return (data ?? []).map(assignmentRow);
+    return [...existing, ...(data ?? []).map(assignmentRow)];
   },
 
   async listAssignments(): Promise<AccountingAssignment[]> {
@@ -84,8 +130,11 @@ export const accountingStore = {
     const [companies, memberships] = await Promise.all([
       this.listCompanies(), this.listMemberships(),
     ]);
-    const appointments = appointmentsStore.list({ startDate: start, endDate: end });
-    const employees = employeesStore.list(true);
+    const appointments = appointmentsStore
+      .list({ startDate: start, endDate: end })
+      .filter(isFinancialAppointment);
+    // O período histórico pode conter colaboradores que hoje estão inativos.
+    const employees = employeesStore.list();
     await this.syncAssignments(appointments, memberships);
     const assignments = await this.listAssignments();
     const assignmentMap = new Map(assignments.map(a => [a.appointmentId, a]));
@@ -95,8 +144,16 @@ export const accountingStore = {
       .filter(a => a.status !== "cancelled")
       .map(appointment => {
         const assignment = assignmentMap.get(appointment.id);
-        const company = assignment ? companyMap.get(assignment.companyId) : undefined;
-        return company ? { appointment, employee: employeeMap.get(appointment.employeeId) ?? null, company, services: appointment.services, grossValue: appointment.totalPrice ?? appointment.services.reduce((sum, service) => sum + service.price, 0) } : null;
+        const date = localDateKey(appointment.startTime) ?? "";
+        const fallbackMembership = memberships
+          .filter(item => item.employeeId === appointment.employeeId && item.validFrom <= date && (!item.validUntil || item.validUntil >= date))
+          .sort((left, right) => right.validFrom.localeCompare(left.validFrom))[0];
+        // Se uma classificação antiga apontar para uma empresa duplicada que
+        // foi ocultada pela deduplicação, recuperamos a empresa pelo vínculo
+        // histórico do colaborador em vez de perder o atendimento.
+        const company = (assignment ? companyMap.get(assignment.companyId) : undefined)
+          ?? (fallbackMembership ? companyMap.get(fallbackMembership.companyId) : undefined);
+        return company ? { appointment, employee: employeeMap.get(appointment.employeeId) ?? null, company, services: appointment.services, grossValue: toNum(appointment.totalPrice) } : null;
       })
       .filter((row): row is AccountingProductionRow => Boolean(row && (!companyId || row.company.id === companyId)));
     return { rows, companies, employees };
