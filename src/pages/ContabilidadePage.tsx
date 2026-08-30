@@ -5,6 +5,7 @@ import { downloadText, productionToCsv } from "@/lib/accounting/exports";
 import type { AccountingCompany, AccountingMembership, AccountingProductionRow } from "@/lib/accounting/types";
 import { employeesStore } from "@/features/funcionarios";
 import { appointmentsStore } from "@/features/agenda";
+import { isFinancialAppointment } from "@/lib/analytics";
 import type { Employee } from "@/lib/store/types";
 
 const INITIAL_COMPANIES = [
@@ -53,6 +54,8 @@ export default function ContabilidadePage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [membershipStart, setMembershipStart] = useState(firstOfAccountingPeriod);
   const [rows, setRows] = useState<AccountingProductionRow[]>([]);
+  const [unassignedCount, setUnassignedCount] = useState(0);
+  const [unassignedEmployees, setUnassignedEmployees] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,9 +97,18 @@ export default function ContabilidadePage() {
       }
       currentMemberships = await accountingStore.listMemberships();
       const production = await accountingStore.loadProduction(appliedStart, appliedEnd, companyId === "all" ? undefined : companyId);
+      const validAppointments = appointmentsStore.list({ startDate: appliedStart, endDate: appliedEnd }).filter(isFinancialAppointment);
+      const classifiedIds = new Set(production.rows.map(row => row.appointment.id));
+      const missingAppointments = validAppointments.filter(appointment => !classifiedIds.has(appointment.id));
+      const employeeNames = [...new Set(missingAppointments.map(appointment => {
+        const employee = currentEmployees.find(item => item.id === appointment.employeeId);
+        return employee?.name ?? `ID ${appointment.employeeId}`;
+      }))];
       setCompanies(production.companies);
       setMemberships(currentMemberships);
       setRows(production.rows);
+      setUnassignedCount(companyId === "all" ? missingAppointments.length : 0);
+      setUnassignedEmployees(companyId === "all" ? employeeNames : []);
     } catch (cause: any) {
       setError(cause?.message ?? "Não foi possível carregar o módulo contábil.");
     } finally {
@@ -176,6 +188,8 @@ export default function ContabilidadePage() {
           <h1 className="text-3xl font-bold tracking-tight">Produção prevista</h1>
           <p className="mt-2 max-w-3xl text-sm text-muted-foreground">A agenda é a fonte da verdade. Este módulo apenas organiza os agendamentos mantidos na agenda por empresa e colaborador, sem alterar os modelos existentes.</p>
         </header>
+
+        {unassignedCount > 0 && <section className="rounded-xl border border-amber-400/50 bg-amber-500/10 p-4 text-sm"><p className="font-semibold text-amber-200">{unassignedCount} atendimento(s) válido(s) ainda sem vínculo contábil</p><p className="mt-1 text-amber-100/80">O Financeiro conta esses agendamentos, mas a Contabilidade só os inclui após o colaborador ser associado a uma empresa.</p>{unassignedEmployees.length > 0 && <p className="mt-2 text-xs text-amber-100/70">Colaboradores identificados: {unassignedEmployees.join(", ")}</p>}</section>}
 
         <section className="grid gap-4 md:grid-cols-3">
           <div className="rounded-xl border bg-card p-4"><p className="text-sm text-muted-foreground">Agendamentos na agenda</p><p className="mt-1 text-2xl font-semibold">{summary.appointments}</p></div>
