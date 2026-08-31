@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { accountingStore } from "@/lib/accounting/store";
-import { downloadText, productionToCsv } from "@/lib/accounting/exports";
-import type { AccountingCompany, AccountingMembership, AccountingProductionRow } from "@/lib/accounting/types";
+import { downloadText, nfseToCsv, productionToCsv } from "@/lib/accounting/exports";
+import type { AccountingCompany, AccountingMembership, AccountingProductionRow, NfsePreparationRow } from "@/lib/accounting/types";
 import { employeesStore } from "@/features/funcionarios";
 import { appointmentsStore } from "@/features/agenda";
+import { clientsStore } from "@/features/clientes";
 import { isFinancialAppointment } from "@/lib/analytics";
 import type { Employee } from "@/lib/store/types";
 
@@ -77,6 +78,7 @@ export default function ContabilidadePage() {
   const [unassignedEmployees, setUnassignedEmployees] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [nfseFilter, setNfseFilter] = useState<"all" | "missing_document" | "ready">("all");
 
   const load = async () => {
     setLoading(true);
@@ -87,6 +89,7 @@ export default function ContabilidadePage() {
       const [loadedEmployees] = await Promise.all([
         employeesStore.fetchAll(),
         appointmentsStore.fetchAll(),
+        clientsStore.fetchAll(),
       ]);
       // Vínculos históricos também precisam incluir colaboradores atualmente
       // inativos, pois o período contábil começa em janeiro de 2026.
@@ -214,6 +217,35 @@ export default function ContabilidadePage() {
     });
   }, [referenceRows]);
 
+  const nfseAllRows = useMemo<NfsePreparationRow[]>(() => {
+    const clientsById = new Map(clientsStore.list().map(client => [client.id, client]));
+    return rows.map(row => {
+      const client = row.appointment.clientId ? clientsById.get(row.appointment.clientId) ?? null : null;
+      const serviceDescription = row.services.map(service => service.name).filter(Boolean).join(" + ") || "Serviço prestado";
+      const serviceValue = Number(row.appointment.totalPrice ?? row.grossValue ?? 0);
+      return {
+        appointmentId: row.appointment.id,
+        company: row.company,
+        employee: row.employee,
+        appointment: row.appointment,
+        client,
+        serviceDescription,
+        serviceValue,
+        status: client?.cpf?.replace(/\D/g, "") ? "ready" : "missing_document",
+      } satisfies NfsePreparationRow;
+    });
+  }, [rows]);
+
+  const nfseRows = useMemo(() => nfseFilter === "all" ? nfseAllRows : nfseAllRows.filter(row => row.status === nfseFilter), [nfseAllRows, nfseFilter]);
+
+  const exportNfseCsv = async () => {
+    if (!nfseRows.length) return;
+    downloadText(`preparacao-nfse-${appliedStart}-${appliedEnd}.csv`, nfseToCsv(nfseRows));
+    const selected = companyId === "all" ? companies[0] : companies.find(company => company.id === companyId);
+    if (selected) await accountingStore.recordExport({ companyId: selected.id, periodStart: appliedStart, periodEnd: appliedEnd, format: "csv", rowCount: nfseRows.length });
+    toast.success("CSV da NFS-e criado", { description: "O arquivo foi baixado para conferência no outro aplicativo." });
+  };
+
   const exportCsv = async () => {
     if (!rows.length) return;
     downloadText(`producao-prevista-${appliedStart}-${appliedEnd}.csv`, productionToCsv(rows));
@@ -246,6 +278,20 @@ export default function ContabilidadePage() {
             <label className="text-sm">Empresa<select value={companyId} onChange={event => setCompanyId(event.currentTarget.value)} className="mt-1 block w-full rounded-md border bg-background px-3 py-2"><option value="all">Todas as empresas</option>{companies.map(company => <option key={company.id} value={company.id}>{company.name} — {company.cnpj}</option>)}</select></label>
             <div className="flex gap-2"><button onClick={applyPeriod} disabled={loading} className="rounded-md border px-4 py-2 font-medium disabled:opacity-50">Aplicar período</button><button onClick={() => void exportCsv()} disabled={!rows.length || loading} className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">Exportar CSV</button></div>
           </div>
+        </section>
+
+        <section className="rounded-xl border border-emerald-400/40 bg-emerald-500/5 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="text-lg font-semibold">Preparar NFS-e</h2><p className="mt-1 text-sm text-muted-foreground">Fila de conferência baseada nos atendimentos válidos do período. O Domínio Pro não emite a nota automaticamente.</p></div>
+            <button onClick={() => void exportNfseCsv()} disabled={!nfseRows.length || loading} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Exportar CSV NFS-e</button>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Registros no período</p><p className="mt-1 text-xl font-semibold">{nfseAllRows.length}</p></div>
+            <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Prontos para exportar</p><p className="mt-1 text-xl font-semibold text-emerald-400">{nfseAllRows.filter(row => row.status === "ready").length}</p></div>
+            <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Falta CPF/CNPJ</p><p className="mt-1 text-xl font-semibold text-amber-400">{nfseAllRows.filter(row => row.status === "missing_document").length}</p></div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2"><label className="text-sm">Exibir<select value={nfseFilter} onChange={event => setNfseFilter(event.currentTarget.value as typeof nfseFilter)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="all">Todos</option><option value="missing_document">Falta CPF/CNPJ</option><option value="ready">Prontos</option></select></label><span className="text-xs text-muted-foreground">Atualize o CPF/CNPJ na aba Clientes e aplique o período novamente.</span></div>
+          {nfseRows.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="px-3 py-2">Data</th><th className="px-3 py-2">Empresa</th><th className="px-3 py-2">Cliente</th><th className="px-3 py-2">CPF/CNPJ</th><th className="px-3 py-2">Serviço</th><th className="px-3 py-2 text-right">Valor</th><th className="px-3 py-2">Situação</th></tr></thead><tbody>{nfseRows.slice(0, 200).map(row => <tr key={`nfse-${row.appointmentId}`} className="border-t"><td className="px-3 py-2 whitespace-nowrap">{formatDate(row.appointment.startTime)}</td><td className="px-3 py-2">{row.company.name}</td><td className="px-3 py-2">{row.client?.name ?? row.appointment.clientName ?? "—"}</td><td className="px-3 py-2">{row.client?.cpf || <span className="text-amber-400">Não informado</span>}</td><td className="px-3 py-2">{row.serviceDescription}</td><td className="px-3 py-2 text-right font-medium">{formatMoney(row.serviceValue)}</td><td className="px-3 py-2">{row.status === "ready" ? <span className="text-emerald-400">Pronta</span> : <span className="text-amber-400">Completar cadastro</span>}</td></tr>)}</tbody></table>{nfseRows.length > 200 && <p className="border-t p-3 text-xs text-muted-foreground">Mostrando 200 de {nfseRows.length}; o CSV contém todos os registros filtrados.</p>}</div> : <p className="mt-4 text-sm text-muted-foreground">Nenhum registro corresponde ao filtro selecionado.</p>}
         </section>
 
         {projections.length > 0 && <section className="rounded-xl border border-blue-400/40 bg-blue-500/5 p-4">

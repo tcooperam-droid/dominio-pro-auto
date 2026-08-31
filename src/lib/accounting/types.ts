@@ -1,4 +1,4 @@
-import type { Appointment, Employee, Expense } from "@/lib/store/types";
+import type { Appointment, Client, Employee, Expense } from "@/lib/store/types";
 
 export interface AccountingCompany {
   id: string;
@@ -29,6 +29,17 @@ export interface AccountingProductionRow {
   company: AccountingCompany;
   services: Appointment["services"];
   grossValue: number;
+}
+
+export interface NfsePreparationRow {
+  appointmentId: number;
+  company: AccountingCompany;
+  employee: Employee | null;
+  appointment: Appointment;
+  client: Client | null;
+  serviceDescription: string;
+  serviceValue: number;
+  status: "missing_document" | "ready";
 }
 
 export interface AccountingSummary {
