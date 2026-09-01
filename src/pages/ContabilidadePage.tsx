@@ -54,13 +54,16 @@ function addDays(date: string, days: number) {
   return result.toISOString().slice(0, 10);
 }
 
-function monthPeriod(monthKey: string) {
-  const [yearText, monthText] = monthKey.split("-");
+function monthPeriod(monthKey: string, includeFuture = false) {
+  const todayMonth = isoToday.slice(0, 7);
+  const safeMonth = !includeFuture && monthKey > todayMonth ? todayMonth : monthKey;
+  const [yearText, monthText] = safeMonth.split("-");
   const year = Number(yearText);
   const month = Number(monthText);
   if (!year || !month || month < 1 || month > 12) return { start: firstOfAccountingPeriod, end: isoToday };
   const lastDay = new Date(year, month, 0).getDate();
-  return { start: `${monthKey}-01`, end: `${monthKey}-${String(lastDay).padStart(2, "0")}` };
+  const fullEnd = `${safeMonth}-${String(lastDay).padStart(2, "0")}`;
+  return { start: `${safeMonth}-01`, end: !includeFuture && safeMonth === todayMonth ? isoToday : fullEnd };
 }
 
 function shiftMonth(monthKey: string, delta: number) {
@@ -96,6 +99,7 @@ export default function ContabilidadePage() {
   const [nfseFilter, setNfseFilter] = useState<"all" | "missing_document" | "ready">("all");
   const [selectedMonth, setSelectedMonth] = useState(firstOfAccountingPeriod.slice(0, 7));
   const [nfseGrouping, setNfseGrouping] = useState<"client_day" | "appointment">("client_day");
+  const [includeFuture, setIncludeFuture] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -200,12 +204,14 @@ export default function ContabilidadePage() {
 
   const applyPeriod = () => {
     if (!start || !end) return;
-    if (start > end) {
-      setError("A data inicial não pode ser posterior à data final.");
+    const effectiveEnd = includeFuture ? end : (end > isoToday ? isoToday : end);
+    if (start > effectiveEnd) {
+      setError("A data inicial não pode ser posterior ao fim permitido do período.");
       return;
     }
+    setEnd(effectiveEnd);
     setAppliedStart(start);
-    setAppliedEnd(end);
+    setAppliedEnd(effectiveEnd);
     setSelectedMonth(start.slice(0, 7));
   };
 
@@ -236,10 +242,15 @@ export default function ContabilidadePage() {
   }, [referenceRows]);
 
   const nfseDetailedRows = useMemo<NfsePreparationRow[]>(() => {
-    const clientsById = new Map(clientsStore.list().map(client => [client.id, client]));
+    const clients = clientsStore.list();
+    const clientsById = new Map(clients.map(client => [client.id, client]));
+    const clientsByName = new Map(clients.map(client => [normalizeName(client.name), client]));
     return rows.map(row => {
-      const client = row.appointment.clientId ? clientsById.get(row.appointment.clientId) ?? null : null;
-      const serviceDescription = row.services.map(service => service.name).filter(Boolean).join(" + ") || "Serviço prestado";
+      const client = row.appointment.clientId
+        ? clientsById.get(row.appointment.clientId) ?? null
+        : clientsByName.get(normalizeName(row.appointment.clientName ?? "")) ?? null;
+      const serviceNames = row.services.map(service => service.name).filter(Boolean);
+      const serviceDescription = serviceNames.join(" + ") || "Serviço prestado";
       const serviceValue = Number(row.appointment.totalPrice ?? row.grossValue ?? 0);
       return {
         appointmentId: row.appointment.id,
@@ -249,6 +260,7 @@ export default function ContabilidadePage() {
         appointment: row.appointment,
         client,
         serviceDescription,
+        serviceNames,
         serviceValue,
         status: client?.cpf?.replace(/\D/g, "") ? "ready" : "missing_document",
       } satisfies NfsePreparationRow;
@@ -260,7 +272,7 @@ export default function ContabilidadePage() {
     const grouped = new Map<string, NfsePreparationRow>();
     for (const row of nfseDetailedRows) {
       const date = row.appointment.startTime.slice(0, 10);
-      const clientKey = row.client?.id ?? row.appointment.clientName?.trim().toLowerCase() ?? `appointment-${row.appointmentId}`;
+      const clientKey = row.client?.id ?? normalizeName(row.appointment.clientName ?? `appointment-${row.appointmentId}`);
       const key = `${row.company.id}|${date}|${clientKey}`;
       const existing = grouped.get(key);
       if (!existing) {
@@ -268,6 +280,7 @@ export default function ContabilidadePage() {
         continue;
       }
       existing.appointmentIds = [...existing.appointmentIds, ...row.appointmentIds];
+      existing.serviceNames = [...new Set([...existing.serviceNames, ...row.serviceNames])];
       existing.serviceValue += row.serviceValue;
       if (existing.employee?.id !== row.employee?.id) existing.employee = null;
       if (existing.status === "ready" && row.status === "missing_document") existing.status = "missing_document";
@@ -278,8 +291,8 @@ export default function ContabilidadePage() {
   const nfseRows = useMemo(() => nfseFilter === "all" ? nfseAllRows : nfseAllRows.filter(row => row.status === nfseFilter), [nfseAllRows, nfseFilter]);
 
   const applyMonth = (monthKey: string) => {
-    const period = monthPeriod(monthKey);
-    setSelectedMonth(monthKey);
+    const period = monthPeriod(monthKey, includeFuture);
+    setSelectedMonth(period.start.slice(0, 7));
     setStart(period.start);
     setEnd(period.end);
     setAppliedStart(period.start);
@@ -339,13 +352,14 @@ export default function ContabilidadePage() {
             <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Falta CPF/CNPJ</p><p className="mt-1 text-xl font-semibold text-amber-400">{nfseAllRows.filter(row => row.status === "missing_document").length}</p></div>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className="text-sm">Mês<select value={selectedMonth} onChange={event => applyMonth(event.currentTarget.value)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="2026-01">Janeiro/2026</option><option value="2026-02">Fevereiro/2026</option><option value="2026-03">Março/2026</option><option value="2026-04">Abril/2026</option><option value="2026-05">Maio/2026</option><option value="2026-06">Junho/2026</option><option value="2026-07">Julho/2026</option><option value="2026-08">Agosto/2026</option><option value="2026-09">Setembro/2026</option><option value="2026-10">Outubro/2026</option><option value="2026-11">Novembro/2026</option><option value="2026-12">Dezembro/2026</option></select></label>
+            <label className="text-sm">Mês<input type="month" value={selectedMonth} onChange={event => applyMonth(event.currentTarget.value)} className="ml-2 rounded-md border bg-background px-3 py-2" /></label>
             <button onClick={() => applyMonth(shiftMonth(selectedMonth, -1))} className="rounded-md border px-3 py-2 text-sm">← Mês anterior</button><button onClick={() => applyMonth(shiftMonth(selectedMonth, 1))} className="rounded-md border px-3 py-2 text-sm">Próximo mês →</button>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeFuture} onChange={event => setIncludeFuture(event.currentTarget.checked)} /> Incluir futuros</label>
             <label className="text-sm">Exibir<select value={nfseFilter} onChange={event => setNfseFilter(event.currentTarget.value as typeof nfseFilter)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="all">Todos</option><option value="missing_document">Falta CPF/CNPJ</option><option value="ready">Prontos</option></select></label>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">O mês selecionado atualiza a fila e o CSV. Para alterar datas fora do mês, use o filtro manual acima e toque em Aplicar período.</p>
+          <p className="mt-2 text-xs text-muted-foreground">O mês selecionado atualiza a fila e o CSV. Por padrão, a Contabilidade termina hoje; marque “Incluir futuros” somente quando quiser preparar notas de agendamentos futuros.</p>
           <div className="mt-3"><label className="text-sm">Formato da preparação<select value={nfseGrouping} onChange={event => setNfseGrouping(event.currentTarget.value as typeof nfseGrouping)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="client_day">Uma linha por cliente e dia (recomendado)</option><option value="appointment">Uma linha por atendimento</option></select></label><span className="ml-3 text-xs text-muted-foreground">No modo agrupado, todos os serviços do cliente no mesmo dia formam um único valor.</span></div>
-          {nfseRows.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="px-3 py-2">Data</th><th className="px-3 py-2">Empresa</th><th className="px-3 py-2">Cliente</th><th className="px-3 py-2">CPF/CNPJ</th><th className="px-3 py-2">Serviço/agrupamento</th><th className="px-3 py-2 text-right">Valor</th><th className="px-3 py-2">Situação</th></tr></thead><tbody>{nfseRows.slice(0, 200).map(row => <tr key={`nfse-${row.appointmentId}`} className="border-t"><td className="px-3 py-2 whitespace-nowrap">{formatDate(row.appointment.startTime)}</td><td className="px-3 py-2">{row.company.name}</td><td className="px-3 py-2">{row.client?.name ?? row.appointment.clientName ?? "—"}</td><td className="px-3 py-2">{row.client?.cpf || <span className="text-amber-400">Não informado</span>}</td><td className="px-3 py-2">{row.serviceDescription}{row.appointmentIds.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.appointmentIds.length} atend.)</span>}</td><td className="px-3 py-2 text-right font-medium">{formatMoney(row.serviceValue)}</td><td className="px-3 py-2">{row.status === "ready" ? <span className="text-emerald-400">Pronta</span> : <span className="text-amber-400">Completar cadastro</span>}</td></tr>)}</tbody></table>{nfseRows.length > 200 && <p className="border-t p-3 text-xs text-muted-foreground">Mostrando 200 de {nfseRows.length}; o CSV contém todos os registros filtrados.</p>}</div> : <p className="mt-4 text-sm text-muted-foreground">Nenhum registro corresponde ao filtro selecionado.</p>}
+          {nfseRows.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="px-3 py-2">Data</th><th className="px-3 py-2">Empresa</th><th className="px-3 py-2">Cliente</th><th className="px-3 py-2">CPF/CNPJ</th><th className="px-3 py-2">Serviço/agrupamento</th><th className="px-3 py-2 text-right">Valor</th><th className="px-3 py-2">Situação</th></tr></thead><tbody>{nfseRows.slice(0, 200).map(row => <tr key={`nfse-${row.appointmentId}`} className="border-t"><td className="px-3 py-2 whitespace-nowrap">{formatDate(row.appointment.startTime)}</td><td className="px-3 py-2">{row.company.name}</td><td className="px-3 py-2">{row.client?.name ?? row.appointment.clientName ?? "—"}</td><td className="px-3 py-2">{row.client?.cpf || <span className="text-amber-400">Não informado</span>}</td><td className="px-3 py-2" title={row.serviceNames.join(" + ") || "Serviço prestado"}><span>{row.serviceDescription}</span>{row.appointmentIds.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.appointmentIds.length} atend.; {row.serviceNames.length} serviço(s) de origem)</span>}{row.appointmentIds.length === 1 && row.serviceNames.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.serviceNames.length} serviços)</span>}</td><td className="px-3 py-2 text-right font-medium">{formatMoney(row.serviceValue)}</td><td className="px-3 py-2">{row.status === "ready" ? <span className="text-emerald-400">Pronta</span> : <span className="text-amber-400">Completar cadastro</span>}</td></tr>)}</tbody></table>{nfseRows.length > 200 && <p className="border-t p-3 text-xs text-muted-foreground">Mostrando 200 de {nfseRows.length}; o CSV contém todos os registros filtrados.</p>}</div> : <p className="mt-4 text-sm text-muted-foreground">Nenhum registro corresponde ao filtro selecionado.</p>}
         </section>
 
         {projections.length > 0 && <section className="rounded-xl border border-blue-400/40 bg-blue-500/5 p-4">
