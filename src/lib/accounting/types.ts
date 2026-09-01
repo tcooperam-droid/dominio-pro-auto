@@ -33,6 +33,7 @@ export interface AccountingProductionRow {
 
 export interface NfsePreparationRow {
   appointmentId: number;
+  appointmentIds: number[];
   company: AccountingCompany;
   employee: Employee | null;
   appointment: Appointment;
