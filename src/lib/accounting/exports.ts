@@ -18,7 +18,7 @@ export function productionToCsv(rows: AccountingProductionRow[]): string {
 }
 
 export function nfseToCsv(rows: NfsePreparationRow[]): string {
-  const header = ["empresa_cnpj", "empresa_nome", "data_servico", "cliente_id", "cliente_nome", "cliente_cpf_cnpj", "descricao_servico", "valor_servico", "agendamento_ids", "quantidade_atendimentos", "status_nfe", "observacoes"].map(csvCell).join(";");
+  const header = ["empresa_cnpj", "empresa_nome", "data_servico", "cliente_id", "cliente_nome", "cliente_cpf_cnpj", "descricao_servico", "servicos_de_origem", "valor_servico", "agendamento_ids", "quantidade_atendimentos", "status_nfe", "observacoes"].map(csvCell).join(";");
   const lines = rows.map(row => [
     row.company.cnpj,
     row.company.name,
@@ -27,6 +27,7 @@ export function nfseToCsv(rows: NfsePreparationRow[]): string {
     row.client?.name ?? row.appointment.clientName ?? "",
     row.client?.cpf ?? "",
     row.serviceDescription,
+    row.serviceNames.join(" + "),
     money(row.serviceValue),
     row.appointmentIds.join(","),
     row.appointmentIds.length,

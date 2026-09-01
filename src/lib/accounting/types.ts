@@ -39,6 +39,7 @@ export interface NfsePreparationRow {
   appointment: Appointment;
   client: Client | null;
   serviceDescription: string;
+  serviceNames: string[];
   serviceValue: number;
   status: "missing_document" | "ready";
 }

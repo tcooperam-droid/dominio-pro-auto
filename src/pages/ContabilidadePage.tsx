@@ -249,7 +249,8 @@ export default function ContabilidadePage() {
       const client = row.appointment.clientId
         ? clientsById.get(row.appointment.clientId) ?? null
         : clientsByName.get(normalizeName(row.appointment.clientName ?? "")) ?? null;
-      const serviceDescription = row.services.map(service => service.name).filter(Boolean).join(" + ") || "Serviço prestado";
+      const serviceNames = row.services.map(service => service.name).filter(Boolean);
+      const serviceDescription = serviceNames.join(" + ") || "Serviço prestado";
       const serviceValue = Number(row.appointment.totalPrice ?? row.grossValue ?? 0);
       return {
         appointmentId: row.appointment.id,
@@ -259,6 +260,7 @@ export default function ContabilidadePage() {
         appointment: row.appointment,
         client,
         serviceDescription,
+        serviceNames,
         serviceValue,
         status: client?.cpf?.replace(/\D/g, "") ? "ready" : "missing_document",
       } satisfies NfsePreparationRow;
@@ -278,6 +280,7 @@ export default function ContabilidadePage() {
         continue;
       }
       existing.appointmentIds = [...existing.appointmentIds, ...row.appointmentIds];
+      existing.serviceNames = [...new Set([...existing.serviceNames, ...row.serviceNames])];
       existing.serviceValue += row.serviceValue;
       if (existing.employee?.id !== row.employee?.id) existing.employee = null;
       if (existing.status === "ready" && row.status === "missing_document") existing.status = "missing_document";
@@ -356,7 +359,7 @@ export default function ContabilidadePage() {
           </div>
           <p className="mt-2 text-xs text-muted-foreground">O mês selecionado atualiza a fila e o CSV. Por padrão, a Contabilidade termina hoje; marque “Incluir futuros” somente quando quiser preparar notas de agendamentos futuros.</p>
           <div className="mt-3"><label className="text-sm">Formato da preparação<select value={nfseGrouping} onChange={event => setNfseGrouping(event.currentTarget.value as typeof nfseGrouping)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="client_day">Uma linha por cliente e dia (recomendado)</option><option value="appointment">Uma linha por atendimento</option></select></label><span className="ml-3 text-xs text-muted-foreground">No modo agrupado, todos os serviços do cliente no mesmo dia formam um único valor.</span></div>
-          {nfseRows.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="px-3 py-2">Data</th><th className="px-3 py-2">Empresa</th><th className="px-3 py-2">Cliente</th><th className="px-3 py-2">CPF/CNPJ</th><th className="px-3 py-2">Serviço/agrupamento</th><th className="px-3 py-2 text-right">Valor</th><th className="px-3 py-2">Situação</th></tr></thead><tbody>{nfseRows.slice(0, 200).map(row => <tr key={`nfse-${row.appointmentId}`} className="border-t"><td className="px-3 py-2 whitespace-nowrap">{formatDate(row.appointment.startTime)}</td><td className="px-3 py-2">{row.company.name}</td><td className="px-3 py-2">{row.client?.name ?? row.appointment.clientName ?? "—"}</td><td className="px-3 py-2">{row.client?.cpf || <span className="text-amber-400">Não informado</span>}</td><td className="px-3 py-2">{row.serviceDescription}{row.appointmentIds.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.appointmentIds.length} atend.)</span>}</td><td className="px-3 py-2 text-right font-medium">{formatMoney(row.serviceValue)}</td><td className="px-3 py-2">{row.status === "ready" ? <span className="text-emerald-400">Pronta</span> : <span className="text-amber-400">Completar cadastro</span>}</td></tr>)}</tbody></table>{nfseRows.length > 200 && <p className="border-t p-3 text-xs text-muted-foreground">Mostrando 200 de {nfseRows.length}; o CSV contém todos os registros filtrados.</p>}</div> : <p className="mt-4 text-sm text-muted-foreground">Nenhum registro corresponde ao filtro selecionado.</p>}
+          {nfseRows.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="px-3 py-2">Data</th><th className="px-3 py-2">Empresa</th><th className="px-3 py-2">Cliente</th><th className="px-3 py-2">CPF/CNPJ</th><th className="px-3 py-2">Serviço/agrupamento</th><th className="px-3 py-2 text-right">Valor</th><th className="px-3 py-2">Situação</th></tr></thead><tbody>{nfseRows.slice(0, 200).map(row => <tr key={`nfse-${row.appointmentId}`} className="border-t"><td className="px-3 py-2 whitespace-nowrap">{formatDate(row.appointment.startTime)}</td><td className="px-3 py-2">{row.company.name}</td><td className="px-3 py-2">{row.client?.name ?? row.appointment.clientName ?? "—"}</td><td className="px-3 py-2">{row.client?.cpf || <span className="text-amber-400">Não informado</span>}</td><td className="px-3 py-2" title={row.serviceNames.join(" + ") || "Serviço prestado"}><span>{row.serviceDescription}</span>{row.appointmentIds.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.appointmentIds.length} atend.; {row.serviceNames.length} serviço(s) de origem)</span>}{row.appointmentIds.length === 1 && row.serviceNames.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.serviceNames.length} serviços)</span>}</td><td className="px-3 py-2 text-right font-medium">{formatMoney(row.serviceValue)}</td><td className="px-3 py-2">{row.status === "ready" ? <span className="text-emerald-400">Pronta</span> : <span className="text-amber-400">Completar cadastro</span>}</td></tr>)}</tbody></table>{nfseRows.length > 200 && <p className="border-t p-3 text-xs text-muted-foreground">Mostrando 200 de {nfseRows.length}; o CSV contém todos os registros filtrados.</p>}</div> : <p className="mt-4 text-sm text-muted-foreground">Nenhum registro corresponde ao filtro selecionado.</p>}
         </section>
 
         {projections.length > 0 && <section className="rounded-xl border border-blue-400/40 bg-blue-500/5 p-4">
