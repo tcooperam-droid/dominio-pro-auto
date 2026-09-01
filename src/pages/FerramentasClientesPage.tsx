@@ -34,6 +34,73 @@ function normalizeName(name: string): string {
     .trim();
 }
 
+function normalizePhone(phone: string | null): string {
+  return (phone || "").replace(/\D/g, "");
+}
+
+function nameSimilarity(a: string, b: string): number {
+  const left = normalizeName(a);
+  const right = normalizeName(b);
+  if (!left || !right) return 0;
+  const matrix = Array.from({ length: left.length + 1 }, (_, i) => Array.from({ length: right.length + 1 }, (_, j) => i === 0 ? j : j === 0 ? i : 0));
+  for (let i = 1; i <= left.length; i++) for (let j = 1; j <= right.length; j++) {
+    matrix[i][j] = left[i - 1] === right[j - 1]
+      ? matrix[i - 1][j - 1]
+      : 1 + Math.min(matrix[i - 1][j], matrix[i][j - 1], matrix[i - 1][j - 1]);
+  }
+  return 1 - matrix[left.length][right.length] / Math.max(left.length, right.length);
+}
+
+function mergeProbability(a: Client, b: Client): { label: string; score: number; reason: string } | null {
+  const phoneA = normalizePhone(a.phone);
+  const phoneB = normalizePhone(b.phone);
+  const samePhone = phoneA.length >= 8 && phoneB.length >= 8 && phoneA.slice(-8) === phoneB.slice(-8) && new Set(phoneA).size > 2;
+  const nameScore = nameSimilarity(a.name, b.name);
+  if (samePhone && nameScore >= 0.72) return { label: "Muito alta", score: 98, reason: "Telefone coincidente e nome semelhante" };
+  if (samePhone) return { label: "Alta", score: 90, reason: "Telefone coincidente" };
+  if (nameScore >= 0.92) return { label: "Média", score: Math.round(nameScore * 100), reason: "Nome muito semelhante" };
+  return null;
+}
+
+interface PossibleMergePair { left: Client; right: Client; probability: { label: string; score: number; reason: string } }
+
+function findPossibleMergePairs(clients: Client[]): PossibleMergePair[] {
+  // Bloqueia candidatos por telefone ou partes do nome. Comparar todos os
+  // pares de 1.700+ clientes custaria milhões de comparações e travaria o
+  // celular antes da tela conseguir renderizar.
+  const buckets = new Map<string, number[]>();
+  const addToBucket = (key: string, index: number) => {
+    if (!key) return;
+    const list = buckets.get(key) ?? [];
+    list.push(index);
+    buckets.set(key, list);
+  };
+  clients.forEach((client, index) => {
+    const normalized = normalizeName(client.name);
+    const tokens = normalized.split(" ").filter(Boolean);
+    const phone = normalizePhone(client.phone);
+    if (phone.length >= 8 && new Set(phone).size > 2) addToBucket(`phone:${phone.slice(-8)}`, index);
+    const first = tokens[0] ?? "";
+    const last = tokens[tokens.length - 1] ?? first;
+    addToBucket(`name:${first.slice(0, 4)}:${last.slice(0, 4)}`, index);
+    addToBucket(`first:${first.slice(0, 5)}`, index);
+  });
+  const pairKeys = new Set<string>();
+  const pairs: PossibleMergePair[] = [];
+  for (const indexes of buckets.values()) {
+    for (let i = 0; i < indexes.length; i++) for (let j = i + 1; j < indexes.length; j++) {
+      const leftIndex = Math.min(indexes[i], indexes[j]);
+      const rightIndex = Math.max(indexes[i], indexes[j]);
+      const key = `${leftIndex}:${rightIndex}`;
+      if (pairKeys.has(key)) continue;
+      pairKeys.add(key);
+      const probability = mergeProbability(clients[leftIndex], clients[rightIndex]);
+      if (probability) pairs.push({ left: clients[leftIndex], right: clients[rightIndex], probability });
+    }
+  }
+  return pairs.sort((a, b) => b.probability.score - a.probability.score);
+}
+
 /** Agrupa clientes por nome normalizado */
 function findDuplicateGroups(clients: Client[]): Map<string, Client[]> {
   const groups = new Map<string, Client[]>();
@@ -180,6 +247,7 @@ export default function FerramentasClientesPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [mergeDetailGroup, setMergeDetailGroup] = useState<string | null>(null);
+  const [mergeSuggestedPair, setMergeSuggestedPair] = useState<PossibleMergePair | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vcfInputRef  = useRef<HTMLInputElement>(null);
   const storeVersion = useStoreVersion();
@@ -187,6 +255,7 @@ export default function FerramentasClientesPage() {
   const clients = useMemo(() => clientsStore.list(), [refreshKey, storeVersion]);
   const duplicateGroups = useMemo(() => findDuplicateGroups(clients), [clients]);
   const duplicateGroupsArray = useMemo(() => Array.from(duplicateGroups.entries()), [duplicateGroups]);
+  const possibleMergePairs = useMemo(() => findPossibleMergePairs(clients), [clients]);
 
   const refresh = () => setRefreshKey(k => k + 1);
 
@@ -268,27 +337,58 @@ export default function FerramentasClientesPage() {
 
   // ─── Lógica de Mesclagem Corrigida ────────────────────────
 
-  const executeMerge = async (key: string) => {
-    const group = duplicateGroups.get(key);
-    if (!group) return;
+  const executeMergeClients = async (group: Client[]) => {
     const { keep, removeIds } = mergeClientGroup(group);
-
-    // 1. Reatribuir agendamentos primeiro (Evita órfãos)
     const allAppts = appointmentsStore.list({});
     const apptsToUpdate = allAppts.filter(a => a.clientId != null && removeIds.includes(a.clientId));
-    
-    await Promise.all(apptsToUpdate.map(a => 
-      appointmentsStore.update(a.id, { clientId: keep.id, clientName: keep.name })
-    ));
+    const updatedAppts: typeof apptsToUpdate = [];
 
-    // 2. Atualizar o cadastro master com os dados combinados
-    await clientsStore.update(keep.id, {
-      email: keep.email, phone: keep.phone, birthDate: keep.birthDate,
-      cpf: keep.cpf, address: keep.address, notes: keep.notes
-    });
+    try {
+      // 1. Transferir um agendamento por vez e guardar o estado anterior.
+      // A exclusão só acontece depois que todas as transferências e a
+      // atualização do cadastro principal forem concluídas.
+      for (const appointment of apptsToUpdate) {
+        await appointmentsStore.update(appointment.id, { clientId: keep.id, clientName: keep.name });
+        updatedAppts.push(appointment);
+      }
 
-    // 3. Remover as duplicatas
-    await Promise.all(removeIds.map(id => clientsStore.delete(id)));
+      // 2. Combinar todos os campos não vazios no cadastro mais antigo.
+      await clientsStore.update(keep.id, {
+        name: keep.name, email: keep.email, phone: keep.phone, birthDate: keep.birthDate,
+        cpf: keep.cpf, address: keep.address, notes: keep.notes,
+      });
+
+      // 3. Para pares sugeridos há apenas um duplicado. Ele só é removido
+      // depois de todas as etapas anteriores terem sido confirmadas.
+      for (const id of removeIds) await clientsStore.delete(id);
+    } catch (error) {
+      // Se algo falhar antes da exclusão, restaura os agendamentos já movidos.
+      // O cadastro duplicado permanece no banco, portanto nenhuma informação
+      // fica sem uma cópia disponível.
+      for (const appointment of updatedAppts.reverse()) {
+        try {
+          await appointmentsStore.update(appointment.id, { clientId: appointment.clientId, clientName: appointment.clientName });
+        } catch {
+          // Mantém o erro original; a operação não prossegue para exclusões.
+        }
+      }
+      throw error;
+    }
+  };
+
+  const executeMerge = async (key: string) => {
+    const group = duplicateGroups.get(key);
+    if (group) await executeMergeClients(group);
+  };
+
+  const handleMergeSuggestedPair = async () => {
+    if (!mergeSuggestedPair) return;
+    try {
+      await executeMergeClients([mergeSuggestedPair.left, mergeSuggestedPair.right]);
+      toast.success("Clientes mesclados com sucesso.");
+      setMergeSuggestedPair(null);
+      refresh();
+    } catch { toast.error("Erro ao mesclar os clientes sugeridos."); }
   };
 
   const handleMergeGroup = async (key: string) => {
@@ -378,6 +478,29 @@ export default function FerramentasClientesPage() {
         </Card>
       </div>
 
+      {/* Possíveis mesclas por probabilidade */}
+      {possibleMergePairs.length > 0 && (
+        <Card className="border-border bg-card/50">
+          <CardHeader className="pb-3 border-b">
+            <CardTitle className="text-base flex items-center gap-2"><Users className="w-4 h-4 text-primary" /> Possíveis mesclas por probabilidade</CardTitle>
+            <p className="text-xs text-muted-foreground">Sugestões para conferência. Nenhum cliente será alterado automaticamente.</p>
+          </CardHeader>
+          <CardContent className="p-0">
+            {possibleMergePairs.map(({ left, right, probability }) => (
+              <div key={`${left.id}-${right.id}`} className="border-b last:border-0 border-border p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2"><Badge variant={probability.label === "Muito alta" ? "destructive" : "secondary"}>{probability.label}</Badge><span className="text-xs text-muted-foreground">{probability.score}% de probabilidade</span></div>
+                  <div className="flex items-center gap-2"><span className="text-xs text-muted-foreground">{probability.reason}</span><Button variant="outline" size="sm" className="h-8 gap-1" onClick={() => setMergeSuggestedPair({ left, right, probability })}><Merge className="w-3 h-3" /> Revisar e mesclar</Button></div>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {[left, right].map(client => <div key={client.id} className="rounded-lg bg-secondary/30 p-3"><p className="text-sm font-medium">#{client.id} — {client.name}</p><p className="text-xs text-muted-foreground">Telefone: {client.phone || "não informado"} · E-mail: {client.email || "não informado"}</p></div>)}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Lista de Duplicados */}
       {duplicateGroupsArray.length > 0 && (
         <Card className="border-border bg-card/50">
@@ -458,6 +581,18 @@ export default function FerramentasClientesPage() {
         </DialogContent>
       </Dialog>
       
+      {/* Modal Mesclagem de Sugestão */}
+      <Dialog open={!!mergeSuggestedPair} onOpenChange={() => setMergeSuggestedPair(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Revisar possível mescla</DialogTitle></DialogHeader>
+          {mergeSuggestedPair && <>
+            <p className="text-sm text-muted-foreground">Probabilidade {mergeSuggestedPair.probability.score}% ({mergeSuggestedPair.probability.reason}). O cadastro mais antigo será mantido, os agendamentos serão transferidos e o outro cadastro será excluído. Esta ação não pode ser desfeita.</p>
+            <div className="space-y-2 rounded-lg bg-secondary/30 p-3 text-sm"><p><strong>Será mantido:</strong> #{[mergeSuggestedPair.left, mergeSuggestedPair.right].sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0].id}</p><p>{mergeSuggestedPair.left.name} / {mergeSuggestedPair.right.name}</p></div>
+          </>}
+          <DialogFooter><Button variant="outline" onClick={() => setMergeSuggestedPair(null)}>Cancelar</Button><Button onClick={handleMergeSuggestedPair} className="bg-amber-600 hover:bg-amber-700"><Merge className="mr-2" />Confirmar mesclagem</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Modal Mesclagem Individual */}
       <Dialog open={!!mergeDetailGroup} onOpenChange={() => setMergeDetailGroup(null)}>
         <DialogContent className="max-w-md">

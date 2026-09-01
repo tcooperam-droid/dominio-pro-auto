@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { accountingStore } from "@/lib/accounting/store";
-import { downloadText, productionToCsv } from "@/lib/accounting/exports";
-import type { AccountingCompany, AccountingMembership, AccountingProductionRow } from "@/lib/accounting/types";
+import { downloadText, nfseToCsv, productionToCsv } from "@/lib/accounting/exports";
+import type { AccountingCompany, AccountingMembership, AccountingProductionRow, NfsePreparationRow } from "@/lib/accounting/types";
 import { employeesStore } from "@/features/funcionarios";
 import { appointmentsStore } from "@/features/agenda";
+import { clientsStore } from "@/features/clientes";
 import { isFinancialAppointment } from "@/lib/analytics";
 import type { Employee } from "@/lib/store/types";
 
@@ -36,9 +37,42 @@ function matchesEmployee(employee: Employee, wantedName: string) {
 }
 
 function formatDate(value: string) {
-  const dateKey = value.includes("T") ? value.slice(0, 10) : value.slice(0, 10);
+  const dateKey = value.slice(0, 10);
   const parsed = new Date(`${dateKey}T12:00:00`);
   return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString("pt-BR");
+}
+
+function calendarDays(start: string, end: string) {
+  const from = new Date(`${start}T12:00:00`).getTime();
+  const to = new Date(`${end}T12:00:00`).getTime();
+  return Math.max(1, Math.floor((to - from) / 86400000) + 1);
+}
+
+function addDays(date: string, days: number) {
+  const result = new Date(`${date}T12:00:00`);
+  result.setDate(result.getDate() + days);
+  return result.toISOString().slice(0, 10);
+}
+
+function monthPeriod(monthKey: string) {
+  const [yearText, monthText] = monthKey.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!year || !month || month < 1 || month > 12) return { start: firstOfAccountingPeriod, end: isoToday };
+  const lastDay = new Date(year, month, 0).getDate();
+  return { start: `${monthKey}-01`, end: `${monthKey}-${String(lastDay).padStart(2, "0")}` };
+}
+
+function shiftMonth(monthKey: string, delta: number) {
+  const [yearText, monthText] = monthKey.split("-");
+  const date = new Date(Number(yearText), Number(monthText) - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function projectionPeriod(month: number) {
+  const start = month === 1 ? "2026-01-15" : "2026-02-01";
+  const end = month === 1 ? "2026-01-31" : "2026-02-28";
+  return { start, end, label: month === 1 ? "Janeiro/2026" : "Fevereiro/2026" };
 }
 
 export default function ContabilidadePage() {
@@ -54,10 +88,14 @@ export default function ContabilidadePage() {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [membershipStart, setMembershipStart] = useState(firstOfAccountingPeriod);
   const [rows, setRows] = useState<AccountingProductionRow[]>([]);
+  const [referenceRows, setReferenceRows] = useState<AccountingProductionRow[]>([]);
   const [unassignedCount, setUnassignedCount] = useState(0);
   const [unassignedEmployees, setUnassignedEmployees] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [nfseFilter, setNfseFilter] = useState<"all" | "missing_document" | "ready">("all");
+  const [selectedMonth, setSelectedMonth] = useState(firstOfAccountingPeriod.slice(0, 7));
+  const [nfseGrouping, setNfseGrouping] = useState<"client_day" | "appointment">("client_day");
 
   const load = async () => {
     setLoading(true);
@@ -68,6 +106,7 @@ export default function ContabilidadePage() {
       const [loadedEmployees] = await Promise.all([
         employeesStore.fetchAll(),
         appointmentsStore.fetchAll(),
+        clientsStore.fetchAll(),
       ]);
       // Vínculos históricos também precisam incluir colaboradores atualmente
       // inativos, pois o período contábil começa em janeiro de 2026.
@@ -97,6 +136,8 @@ export default function ContabilidadePage() {
       }
       currentMemberships = await accountingStore.listMemberships();
       const production = await accountingStore.loadProduction(appliedStart, appliedEnd, companyId === "all" ? undefined : companyId);
+      const referenceEnd = isoToday >= "2026-03-01" ? isoToday : "2026-03-01";
+      const referenceProduction = await accountingStore.loadProduction("2026-03-01", referenceEnd, companyId === "all" ? undefined : companyId);
       const validAppointments = appointmentsStore.list({ startDate: appliedStart, endDate: appliedEnd }).filter(isFinancialAppointment);
       const classifiedIds = new Set(production.rows.map(row => row.appointment.id));
       const missingAppointments = validAppointments.filter(appointment => !classifiedIds.has(appointment.id));
@@ -107,6 +148,7 @@ export default function ContabilidadePage() {
       setCompanies(production.companies);
       setMemberships(currentMemberships);
       setRows(production.rows);
+      setReferenceRows(referenceProduction.rows);
       setUnassignedCount(companyId === "all" ? missingAppointments.length : 0);
       setUnassignedEmployees(companyId === "all" ? employeeNames : []);
     } catch (cause: any) {
@@ -164,6 +206,7 @@ export default function ContabilidadePage() {
     }
     setAppliedStart(start);
     setAppliedEnd(end);
+    setSelectedMonth(start.slice(0, 7));
   };
 
   const summary = useMemo(() => ({
@@ -171,6 +214,85 @@ export default function ContabilidadePage() {
     services: rows.reduce((sum, row) => sum + row.services.length, 0),
     value: rows.reduce((sum, row) => sum + row.grossValue, 0),
   }), [rows]);
+
+  const projections = useMemo(() => {
+    if (!referenceRows.length) return [];
+    const referenceEnd = isoToday >= "2026-03-01" ? isoToday : "2026-03-01";
+    const observedDays = calendarDays("2026-03-01", referenceEnd);
+    const byProfessional = new Map<string, { employee: string; company: string; appointments: number; services: number; value: number }>();
+    for (const row of referenceRows) {
+      const key = `${row.company.id}:${row.employee?.id ?? "unknown"}`;
+      const current = byProfessional.get(key) ?? { employee: row.employee?.name ?? "Sem colaborador", company: row.company.name, appointments: 0, services: 0, value: 0 };
+      current.appointments += 1;
+      current.services += row.services.length;
+      current.value += row.grossValue;
+      byProfessional.set(key, current);
+    }
+    return [1, 2].map(month => {
+      const period = projectionPeriod(month);
+      const days = calendarDays(period.start, period.end);
+      return { ...period, rows: [...byProfessional.values()].map(item => ({ ...item, appointments: Math.round(item.appointments / observedDays * days), services: Math.round(item.services / observedDays * days), value: item.value / observedDays * days })).filter(item => item.appointments > 0 || item.services > 0 || item.value > 0) };
+    });
+  }, [referenceRows]);
+
+  const nfseDetailedRows = useMemo<NfsePreparationRow[]>(() => {
+    const clientsById = new Map(clientsStore.list().map(client => [client.id, client]));
+    return rows.map(row => {
+      const client = row.appointment.clientId ? clientsById.get(row.appointment.clientId) ?? null : null;
+      const serviceDescription = row.services.map(service => service.name).filter(Boolean).join(" + ") || "Serviço prestado";
+      const serviceValue = Number(row.appointment.totalPrice ?? row.grossValue ?? 0);
+      return {
+        appointmentId: row.appointment.id,
+        appointmentIds: [row.appointment.id],
+        company: row.company,
+        employee: row.employee,
+        appointment: row.appointment,
+        client,
+        serviceDescription,
+        serviceValue,
+        status: client?.cpf?.replace(/\D/g, "") ? "ready" : "missing_document",
+      } satisfies NfsePreparationRow;
+    });
+  }, [rows]);
+
+  const nfseAllRows = useMemo<NfsePreparationRow[]>(() => {
+    if (nfseGrouping === "appointment") return nfseDetailedRows;
+    const grouped = new Map<string, NfsePreparationRow>();
+    for (const row of nfseDetailedRows) {
+      const date = row.appointment.startTime.slice(0, 10);
+      const clientKey = row.client?.id ?? row.appointment.clientName?.trim().toLowerCase() ?? `appointment-${row.appointmentId}`;
+      const key = `${row.company.id}|${date}|${clientKey}`;
+      const existing = grouped.get(key);
+      if (!existing) {
+        grouped.set(key, { ...row, serviceDescription: "Serviços prestados no dia" });
+        continue;
+      }
+      existing.appointmentIds = [...existing.appointmentIds, ...row.appointmentIds];
+      existing.serviceValue += row.serviceValue;
+      if (existing.employee?.id !== row.employee?.id) existing.employee = null;
+      if (existing.status === "ready" && row.status === "missing_document") existing.status = "missing_document";
+    }
+    return [...grouped.values()].sort((a, b) => a.appointment.startTime.localeCompare(b.appointment.startTime));
+  }, [nfseDetailedRows, nfseGrouping]);
+
+  const nfseRows = useMemo(() => nfseFilter === "all" ? nfseAllRows : nfseAllRows.filter(row => row.status === nfseFilter), [nfseAllRows, nfseFilter]);
+
+  const applyMonth = (monthKey: string) => {
+    const period = monthPeriod(monthKey);
+    setSelectedMonth(monthKey);
+    setStart(period.start);
+    setEnd(period.end);
+    setAppliedStart(period.start);
+    setAppliedEnd(period.end);
+  };
+
+  const exportNfseCsv = async () => {
+    if (!nfseRows.length) return;
+    downloadText(`preparacao-nfse-${appliedStart}-${appliedEnd}.csv`, nfseToCsv(nfseRows));
+    const selected = companyId === "all" ? companies[0] : companies.find(company => company.id === companyId);
+    if (selected) await accountingStore.recordExport({ companyId: selected.id, periodStart: appliedStart, periodEnd: appliedEnd, format: "csv", rowCount: nfseRows.length });
+    toast.success("CSV da NFS-e criado", { description: "O arquivo foi baixado para conferência no outro aplicativo." });
+  };
 
   const exportCsv = async () => {
     if (!rows.length) return;
@@ -205,6 +327,32 @@ export default function ContabilidadePage() {
             <div className="flex gap-2"><button onClick={applyPeriod} disabled={loading} className="rounded-md border px-4 py-2 font-medium disabled:opacity-50">Aplicar período</button><button onClick={() => void exportCsv()} disabled={!rows.length || loading} className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground disabled:opacity-50">Exportar CSV</button></div>
           </div>
         </section>
+
+        <section className="rounded-xl border border-emerald-400/40 bg-emerald-500/5 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="text-lg font-semibold">Preparar NFS-e</h2><p className="mt-1 text-sm text-muted-foreground">Fila de conferência baseada nos atendimentos válidos do período. O Domínio Pro não emite a nota automaticamente.</p></div>
+            <button onClick={() => void exportNfseCsv()} disabled={!nfseRows.length || loading} className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">Exportar CSV NFS-e</button>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Registros no período</p><p className="mt-1 text-xl font-semibold">{nfseAllRows.length}</p></div>
+            <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Prontos para exportar</p><p className="mt-1 text-xl font-semibold text-emerald-400">{nfseAllRows.filter(row => row.status === "ready").length}</p></div>
+            <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">Falta CPF/CNPJ</p><p className="mt-1 text-xl font-semibold text-amber-400">{nfseAllRows.filter(row => row.status === "missing_document").length}</p></div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <label className="text-sm">Mês<select value={selectedMonth} onChange={event => applyMonth(event.currentTarget.value)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="2026-01">Janeiro/2026</option><option value="2026-02">Fevereiro/2026</option><option value="2026-03">Março/2026</option><option value="2026-04">Abril/2026</option><option value="2026-05">Maio/2026</option><option value="2026-06">Junho/2026</option><option value="2026-07">Julho/2026</option><option value="2026-08">Agosto/2026</option><option value="2026-09">Setembro/2026</option><option value="2026-10">Outubro/2026</option><option value="2026-11">Novembro/2026</option><option value="2026-12">Dezembro/2026</option></select></label>
+            <button onClick={() => applyMonth(shiftMonth(selectedMonth, -1))} className="rounded-md border px-3 py-2 text-sm">← Mês anterior</button><button onClick={() => applyMonth(shiftMonth(selectedMonth, 1))} className="rounded-md border px-3 py-2 text-sm">Próximo mês →</button>
+            <label className="text-sm">Exibir<select value={nfseFilter} onChange={event => setNfseFilter(event.currentTarget.value as typeof nfseFilter)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="all">Todos</option><option value="missing_document">Falta CPF/CNPJ</option><option value="ready">Prontos</option></select></label>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">O mês selecionado atualiza a fila e o CSV. Para alterar datas fora do mês, use o filtro manual acima e toque em Aplicar período.</p>
+          <div className="mt-3"><label className="text-sm">Formato da preparação<select value={nfseGrouping} onChange={event => setNfseGrouping(event.currentTarget.value as typeof nfseGrouping)} className="ml-2 rounded-md border bg-background px-3 py-2"><option value="client_day">Uma linha por cliente e dia (recomendado)</option><option value="appointment">Uma linha por atendimento</option></select></label><span className="ml-3 text-xs text-muted-foreground">No modo agrupado, todos os serviços do cliente no mesmo dia formam um único valor.</span></div>
+          {nfseRows.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="px-3 py-2">Data</th><th className="px-3 py-2">Empresa</th><th className="px-3 py-2">Cliente</th><th className="px-3 py-2">CPF/CNPJ</th><th className="px-3 py-2">Serviço/agrupamento</th><th className="px-3 py-2 text-right">Valor</th><th className="px-3 py-2">Situação</th></tr></thead><tbody>{nfseRows.slice(0, 200).map(row => <tr key={`nfse-${row.appointmentId}`} className="border-t"><td className="px-3 py-2 whitespace-nowrap">{formatDate(row.appointment.startTime)}</td><td className="px-3 py-2">{row.company.name}</td><td className="px-3 py-2">{row.client?.name ?? row.appointment.clientName ?? "—"}</td><td className="px-3 py-2">{row.client?.cpf || <span className="text-amber-400">Não informado</span>}</td><td className="px-3 py-2">{row.serviceDescription}{row.appointmentIds.length > 1 && <span className="ml-2 text-xs text-muted-foreground">({row.appointmentIds.length} atend.)</span>}</td><td className="px-3 py-2 text-right font-medium">{formatMoney(row.serviceValue)}</td><td className="px-3 py-2">{row.status === "ready" ? <span className="text-emerald-400">Pronta</span> : <span className="text-amber-400">Completar cadastro</span>}</td></tr>)}</tbody></table>{nfseRows.length > 200 && <p className="border-t p-3 text-xs text-muted-foreground">Mostrando 200 de {nfseRows.length}; o CSV contém todos os registros filtrados.</p>}</div> : <p className="mt-4 text-sm text-muted-foreground">Nenhum registro corresponde ao filtro selecionado.</p>}
+        </section>
+
+        {projections.length > 0 && <section className="rounded-xl border border-blue-400/40 bg-blue-500/5 p-4">
+          <h2 className="text-lg font-semibold">Projeção provável — janeiro e fevereiro/2026</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Estimativa calculada pela média diária observada por profissional a partir de março. Janeiro considera somente 15 a 31/01; fevereiro considera 01 a 28/02. Estes valores não substituem os dados reais da Agenda.</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">{projections.map(projection => { const total = projection.rows.reduce((sum, row) => sum + row.value, 0); const appointments = projection.rows.reduce((sum, row) => sum + row.appointments, 0); const services = projection.rows.reduce((sum, row) => sum + row.services, 0); return <div key={projection.label} className="rounded-lg border bg-card p-4"><div className="flex items-center justify-between"><h3 className="font-medium">{projection.label}</h3><span className="rounded-full bg-blue-500/15 px-2 py-1 text-xs text-blue-300">Estimativa</span></div><div className="mt-3 grid grid-cols-3 gap-2 text-sm"><div><p className="text-muted-foreground">Atend.</p><p className="font-semibold">{appointments}</p></div><div><p className="text-muted-foreground">Serviços</p><p className="font-semibold">{services}</p></div><div><p className="text-muted-foreground">Valor</p><p className="font-semibold">{formatMoney(total)}</p></div></div><div className="mt-4 space-y-2">{projection.rows.map(row => <div key={`${projection.label}-${row.company}-${row.employee}`} className="flex items-center justify-between gap-3 border-t pt-2 text-sm"><div><p className="font-medium">{row.employee}</p><p className="text-xs text-muted-foreground">{row.company}</p></div><div className="text-right"><p>{row.appointments} atend. · {row.services} serv.</p><p className="font-medium">{formatMoney(row.value)}</p></div></div>)}</div></div>; })}</div>
+        </section>}
 
         <section className="rounded-xl border bg-card p-4">
           <h2 className="text-lg font-semibold">Empresas e vínculos contábeis</h2>
