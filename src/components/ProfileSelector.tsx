@@ -81,8 +81,8 @@ export default function ProfileSelector({ onSelect }: ProfileSelectorProps = {})
 
   const profiles = [
     { role: "owner"    as UserRole, emoji: "👑", label: "Dono",                      sublabel: "Acesso total",      enabled: true },
-    { role: "manager"  as UserRole, emoji: "👔", label: cfg.managerName || "Gerente", sublabel: "Acesso total",      enabled: cfg.managerEnabled },
-    { role: "employee" as UserRole, emoji: "✂️", label: "Funcionário",               sublabel: "Agenda e clientes", enabled: cfg.employeesAccessEnabled },
+    { role: "manager"  as UserRole, emoji: "👔", label: cfg.managerName || "Gerente", sublabel: "Acesso total",      enabled: cfg.managerEnabled && cfg.managerPassword.length >= 4 },
+    { role: "employee" as UserRole, emoji: "✂️", label: "Funcionário",               sublabel: "Agenda e clientes", enabled: cfg.employeesAccessEnabled && cfg.employeePassword.length >= 4 },
   ].filter(p => p.enabled);
 
   async function handleProfileClick(role: UserRole, label: string) {

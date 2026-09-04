@@ -144,8 +144,22 @@ export default function ConfiguracoesPage() {
   };
 
   const handleSaveAccess = () => {
+    if (access.ownerPassword.length > 0 && access.ownerPassword.length < 4) {
+      toast.error("A senha do dono deve ter pelo menos 4 caracteres ou ficar vazia para desativar o controle.");
+      return;
+    }
+    if (access.managerEnabled && access.managerPassword.length < 4) {
+      toast.error("Defina uma senha de gerente com pelo menos 4 caracteres ou desative este perfil.");
+      return;
+    }
+    if (access.employeesAccessEnabled && access.employeePassword.length < 4) {
+      toast.error("Defina uma senha de funcionário com pelo menos 4 caracteres ou desative este perfil.");
+      return;
+    }
+
     saveAccessConfig(access);
     window.dispatchEvent(new Event("salon_config_updated"));
+    window.dispatchEvent(new CustomEvent("dominio_access_config_changed"));
     toast.success("Configurações de acesso salvas!");
   };
 

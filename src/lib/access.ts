@@ -103,10 +103,16 @@ export function getSession(): Session | null {
 export function setSession(role: UserRole, profileName: string): void {
   const session: Session = { role, profileName, loginAt: Date.now() };
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("dominio_session_changed"));
+  }
 }
 
 export function clearSession(): void {
   sessionStorage.removeItem(SESSION_KEY);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("dominio_session_changed"));
+  }
 }
 
 export function canAccess(role: UserRole, path: string): boolean {

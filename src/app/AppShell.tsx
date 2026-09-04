@@ -7,6 +7,7 @@ import AgentChat from "../components/AgentChat";
 import AppRoutes from "./AppRoutes";
 import { subscribeToAgentConfig } from "./agentBootstrap";
 import { fetchAllData } from "../features/agenda";
+import { getSession, isAccessControlEnabled } from "../lib/access";
 
 interface BootstrapState {
   loading: boolean;
@@ -18,8 +19,9 @@ function useApplicationBootstrap(): {
   bootstrap: BootstrapState;
   retry: () => void;
 } {
+  const canBootstrap = () => !isAccessControlEnabled() || Boolean(getSession());
   const [bootstrap, setBootstrap] = useState<BootstrapState>({
-    loading: true,
+    loading: canBootstrap(),
     failed: [],
     error: null,
   });
@@ -41,7 +43,17 @@ function useApplicationBootstrap(): {
   }, []);
 
   useEffect(() => {
-    void load();
+    const syncBootstrapWithSession = () => {
+      if (canBootstrap()) {
+        void load();
+      } else {
+        setBootstrap({ loading: false, failed: [], error: null });
+      }
+    };
+
+    syncBootstrapWithSession();
+    window.addEventListener("dominio_session_changed", syncBootstrapWithSession);
+    return () => window.removeEventListener("dominio_session_changed", syncBootstrapWithSession);
   }, [load]);
 
   useEffect(() => subscribeToAgentConfig(), []);
