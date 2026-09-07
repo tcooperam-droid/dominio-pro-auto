@@ -37,6 +37,7 @@ O agente pessoal fica em `src/features/agente-pessoal/`. Ele é uma camada de pr
 
 api/
 ├── agent.js                 # Proxy server-side para um provedor OpenAI-compatible
+├── research.js              # Pesquisa web com Google Search Grounding do Gemini
 └── search.js                # Proxy server-side para Tavily
 ```
 
@@ -64,7 +65,7 @@ Para produção, configure os valores no provedor de hospedagem. A chave do prov
 | `LLM_API_KEY` | Chave privada usada pelo proxy do agente | Vercel ou outro ambiente server-side |
 | `LLM_API_URL` | Endpoint opcional `.../chat/completions` do provedor | Vercel ou outro ambiente server-side |
 | `LLM_MODEL` | Modelo opcional do provedor, como `gemini-3.8-flash` | Vercel ou outro ambiente server-side |
-| `TAVILY_API_KEY` | Token privado da pesquisa web | Vercel ou outro ambiente server-side |
+| `TAVILY_API_KEY` | Token privado da pesquisa web legada do chat principal | Vercel ou outro ambiente server-side |
 | `VITE_SUPABASE_URL` | URL do projeto Supabase | `.env` local e variáveis do deploy |
 | `VITE_SUPABASE_ANON_KEY` | Chave pública anon do Supabase | `.env` local e variáveis do deploy |
 | `VITE_LLM_API_KEY` | Chave para desenvolvimento local | Somente local; não recomendado em produção |
@@ -77,12 +78,12 @@ A chave anon do Supabase pode ser usada no frontend, mas as tabelas precisam est
 
 Em produção, o chat, a análise de imagens e o resumo de pesquisas usam `/api/agent`, que encaminha as requisições ao provedor configurado sem expor a chave no bundle do navegador. Em desenvolvimento local, o agente usa o endpoint direto apenas quando `VITE_LLM_API_KEY` estiver configurado ou quando uma chave local for salva nas configurações.
 
-O agente oferece consulta de dados, criação e alteração de agendamentos, criação de clientes, análise de imagens, pesquisa web e síntese de voz pelo navegador. A pesquisa web utiliza `/api/search` e exige `TAVILY_API_KEY` no ambiente server-side.
+O agente oferece consulta de dados, criação e alteração de agendamentos, criação de clientes, análise de imagens, pesquisa web e síntese de voz pelo navegador. O agente pessoal pesquisa automaticamente perguntas atuais usando `/api/research`, o Google Search Grounding nativo do Gemini e citações de fontes. O chat principal mantém `/api/search` com Tavily para compatibilidade.
 
 ## Publicação na Vercel
 
 1. Importe o repositório na Vercel.
-2. Configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `LLM_API_KEY` e, se desejar, `LLM_API_URL` e `TAVILY_API_KEY`.
+2. Configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `LLM_API_KEY`, `LLM_API_URL` e `LLM_MODEL` no ambiente server-side. `TAVILY_API_KEY` só é necessária para a pesquisa legada do chat principal; o agente pessoal usa a mesma chave Gemini configurada em `LLM_API_KEY`.
 3. Execute o build `npm run build`.
 4. Publique o projeto. O `vercel.json` direciona as rotas da SPA para `index.html`, enquanto as funções em `api/` permanecem acessíveis.
 5. Confirme no Supabase se as políticas RLS permitem as operações esperadas pelo usuário anônimo ou autenticado usado pelo aplicativo.

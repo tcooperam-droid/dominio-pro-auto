@@ -32,6 +32,18 @@ function MessageBubble({ message, onRate }: { message: PersonalMessage; onRate: 
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[min(88%,760px)] rounded-2xl px-4 py-3 text-sm shadow-sm ${isUser ? "bg-primary text-primary-foreground" : "border bg-card text-card-foreground"}`}>
         <div className="whitespace-pre-wrap leading-6">{message.content}</div>
+        {message.citations && message.citations.length > 0 && (
+          <div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
+            <div className="mb-1 font-medium">Fontes consultadas</div>
+            <div className="space-y-1">
+              {message.citations.map((citation) => (
+                <a key={citation.url} href={citation.url} target="_blank" rel="noreferrer" className="block truncate text-primary underline-offset-2 hover:underline">
+                  {citation.title || citation.url}
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
         {!isUser && (
           <div className="mt-3 flex items-center gap-1 border-t pt-2 text-muted-foreground">
             <span className="mr-1 text-[11px]">A resposta ajudou?</span>
@@ -90,7 +102,7 @@ export default function PersonalAgentPage() {
               </div>
             )}
             {messages.map((message) => <MessageBubble key={message.id} message={message} onRate={(rating) => rate(message.id, rating)} />)}
-            {sending && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Pensando…</div>}
+            {sending && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Pesquisando ou pensando…</div>}
             {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</div>}
             <div ref={endRef} />
           </div>

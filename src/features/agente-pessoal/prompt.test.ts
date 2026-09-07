@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractFactCommand, extractGoalCommand, extractTeachingInstruction, isSchedulerRequest } from "./prompt";
+import { extractFactCommand, extractGoalCommand, extractTeachingInstruction, isLikelyWebResearchRequest, isSchedulerRequest } from "./prompt";
 
 
 describe("agente pessoal: comandos e roteamento", () => {
@@ -19,5 +19,11 @@ describe("agente pessoal: comandos e roteamento", () => {
     expect(isSchedulerRequest("Cancelar o agendamento da Maria")).toBe(true);
     expect(isSchedulerRequest("Como organizar melhor minha agenda pessoal?")).toBe(false);
     expect(isSchedulerRequest("Me dê uma ideia de agenda semanal")).toBe(false);
+  });
+
+  it("detecta perguntas que precisam de pesquisa atual na Internet", () => {
+    expect(isLikelyWebResearchRequest("Pesquise as últimas notícias sobre inteligência artificial")).toBe(true);
+    expect(isLikelyWebResearchRequest("Qual é o preço atual do dólar?")).toBe(true);
+    expect(isLikelyWebResearchRequest("Me ajude a organizar minhas prioridades")).toBe(false);
   });
 });

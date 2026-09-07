@@ -7,6 +7,14 @@ export interface PersonalMessage {
   createdAt: string;
   feedback?: "good" | "bad";
   routedTo?: "personal" | "scheduler";
+  citations?: WebCitation[];
+}
+
+export interface WebCitation {
+  title: string;
+  url: string;
+  startIndex?: number;
+  endIndex?: number;
 }
 
 export interface PersonalFeedback {
@@ -50,6 +58,7 @@ export interface PersonalAgentResponse {
   actionExecuted?: boolean;
   navigateTo?: string;
   userMessage: string;
+  citations?: WebCitation[];
 }
 
 export interface SchedulerBridge {

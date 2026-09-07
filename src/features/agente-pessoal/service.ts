@@ -1,7 +1,7 @@
 import { createAgentHeaders, getAgentEndpoint } from "@/features/assistente/llmEndpoint";
 import { getSession } from "@/lib/access";
 import { addFeedback, addGoal, addInstruction, appendSummary, completeGoal, loadConversation, loadMemory, rememberFact, saveConversation } from "./memory";
-import { buildConversationContext, buildPersonalSystemPrompt, extractFactCommand, extractGoalCommand, extractTeachingInstruction, isSchedulerRequest } from "./prompt";
+import { buildConversationContext, buildPersonalSystemPrompt, extractFactCommand, extractGoalCommand, extractTeachingInstruction, isLikelyWebResearchRequest, isSchedulerRequest } from "./prompt";
 import { createSchedulerBridge } from "./bridge";
 import {
   PERSONAL_AGENT_MODEL,
@@ -9,6 +9,7 @@ import {
   type PersonalAgentConfig,
   type PersonalAgentResponse,
   type PersonalMessage,
+  type WebCitation,
 } from "./types";
 
 let config: PersonalAgentConfig | null = null;
@@ -47,8 +48,8 @@ export function getPersonalConversation(): PersonalMessage[] {
   return loadConversation(currentScope());
 }
 
-async function callPersonalLLM(scope: string, message: string): Promise<string> {
-  if (!config) return "O agente pessoal ainda não foi configurado.";
+async function callPersonalLLM(scope: string, message: string): Promise<{ text: string; citations?: WebCitation[] }> {
+  if (!config) return { text: "O agente pessoal ainda não foi configurado." };
   const endpoint = getAgentEndpoint(config.apiEndpoint);
   const memory = loadMemory(scope);
   const history = loadConversation(scope).slice(-12);
@@ -56,9 +57,13 @@ async function callPersonalLLM(scope: string, message: string): Promise<string> 
     salonName: config.salonName,
     userName: config.userName || getSession()?.profileName,
   });
-  const response = await fetch(endpoint, {
+  const research = isLikelyWebResearchRequest(message);
+  const requestEndpoint = research
+    ? (import.meta.env.PROD ? "/api/research" : "/api/research")
+    : endpoint;
+  const response = await fetch(requestEndpoint, {
     method: "POST",
-    headers: createAgentHeaders(endpoint, config.apiToken),
+    headers: createAgentHeaders(requestEndpoint, config.apiToken),
     body: JSON.stringify({
       model: config.model || PERSONAL_AGENT_MODEL,
       messages: [
@@ -74,11 +79,12 @@ async function callPersonalLLM(scope: string, message: string): Promise<string> 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof payload?.error === "string" ? payload.error : `HTTP ${response.status}`;
+    if (research) throw new Error(`Não consegui pesquisar na Internet: ${detail}`);
     throw new Error(`Não foi possível consultar o agente pessoal: ${detail}`);
   }
   const text = payload?.choices?.[0]?.message?.content;
-  if (typeof text !== "string" || !text.trim()) throw new Error("O modelo não retornou uma resposta válida.");
-  return text.trim();
+  if (typeof text !== "string" || !text.trim()) throw new Error(research ? "A pesquisa não retornou uma resposta válida." : "O modelo não retornou uma resposta válida.");
+  return { text: text.trim(), citations: Array.isArray(payload?.citations) ? payload.citations : undefined };
 }
 
 function localCommandResponse(scope: string, message: string): string | null {
@@ -128,11 +134,12 @@ export async function sendPersonalMessage(text: string): Promise<PersonalAgentRe
   }
 
   const localResponse = localCommandResponse(scope, message);
-  const responseText = localResponse || await callPersonalLLM(scope, message);
+  const llmResponse = localResponse ? { text: localResponse } : await callPersonalLLM(scope, message);
+  const responseText = llmResponse.text;
   const user = userMessage(message, "personal");
-  const assistant = assistantMessage(responseText, "personal");
+  const assistant = { ...assistantMessage(responseText, "personal"), citations: llmResponse.citations };
   saveExchange(scope, user, assistant);
-  return { text: responseText, messageId: assistant.id, routedTo: "personal", userMessage: message };
+  return { text: responseText, messageId: assistant.id, routedTo: "personal", userMessage: message, citations: llmResponse.citations };
 }
 
 export function ratePersonalResponse(userMessage: string, assistantResponse: string, rating: "good" | "bad"): void {

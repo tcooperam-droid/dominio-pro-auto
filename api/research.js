@@ -1,0 +1,105 @@
+const DEFAULT_MODEL = "gemini-3.8-flash";
+
+function readBody(req) {
+  if (!req.body) return {};
+  return typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+}
+
+function messageToText(message) {
+  const role = message.role === "system" ? "Instruções do sistema" : message.role === "assistant" ? "Assistente" : "Usuário";
+  return `${role}: ${typeof message.content === "string" ? message.content : ""}`;
+}
+
+function extractOutput(interaction) {
+  const textParts = [];
+  const citations = [];
+  for (const step of interaction?.steps || []) {
+    if (step?.type !== "model_output") continue;
+    for (const block of step.content || []) {
+      if (block?.type !== "text" || typeof block.text !== "string") continue;
+      textParts.push(block.text);
+      for (const annotation of block.annotations || []) {
+        if (annotation?.type === "url_citation" && annotation.url) {
+          citations.push({
+            title: annotation.title || annotation.url,
+            url: annotation.url,
+            startIndex: annotation.start_index,
+            endIndex: annotation.end_index,
+          });
+        }
+      }
+    }
+  }
+  return {
+    text: textParts.join("\n").trim() || interaction?.output_text || "",
+    citations: citations.filter((citation, index, list) => list.findIndex((item) => item.url === citation.url) === index),
+  };
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST");
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const apiKey = process.env.LLM_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "LLM_API_KEY não configurada no ambiente do servidor." });
+  }
+
+  let body;
+  try {
+    body = readBody(req);
+  } catch {
+    return res.status(400).json({ error: "Body inválido (JSON esperado)." });
+  }
+
+  if (!Array.isArray(body.messages) || body.messages.length === 0) {
+    return res.status(400).json({ error: "messages deve ser uma lista não vazia." });
+  }
+
+  const input = body.messages.map(messageToText).join("\n\n");
+  const model = process.env.LLM_MODEL || body.model || DEFAULT_MODEL;
+
+  try {
+    const upstream = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        model,
+        input,
+        tools: [{ type: "google_search" }],
+      }),
+    });
+
+    const raw = await upstream.text();
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", "application/json");
+
+    if (!upstream.ok) {
+      return res.status(upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502).send(raw.slice(0, 2000));
+    }
+
+    const interaction = JSON.parse(raw);
+    const output = extractOutput(interaction);
+    if (!output.text) return res.status(502).json({ error: "O Gemini não retornou texto após a pesquisa." });
+
+    return res.status(200).json({
+      model,
+      choices: [{ message: { role: "assistant", content: output.text }, finish_reason: "stop" }],
+      citations: output.citations,
+      grounded: true,
+    });
+  } catch (error) {
+    return res.status(502).json({
+      error: "Falha ao pesquisar na Internet com o Gemini.",
+      details: String(error?.message || error).slice(0, 300),
+    });
+  }
+}
+
+// O endpoint usa o Google Search Grounding nativo do Gemini. A chave permanece
+// apenas no ambiente server-side da Vercel e nunca é enviada pelo navegador.

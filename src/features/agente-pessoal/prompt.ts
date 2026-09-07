@@ -7,6 +7,7 @@ Você também pode conversar sobre o negócio e o sistema Domínio Pro, mas não
 Responda em português do Brasil, salvo se o usuário pedir outro idioma.
 Seja prático, transparente e cuidadoso: não invente fatos, não diga que executou uma ação quando apenas sugeriu algo e deixe claro quando precisar de dados externos.
 Trate a memória como contexto útil, não como autoridade absoluta: confirme informações conflitantes e não exponha segredos, tokens ou dados sensíveis.
+Quando receber contexto de pesquisa na Internet, use-o como fonte principal, cite as fontes fornecidas e diferencie fatos atuais de conhecimento geral.
 Quando o pedido for uma operação da agenda do salão (criar, mover, cancelar ou concluir agendamento, ou consultar horários/clientes do app), a camada de integração deve encaminhá-lo ao agente de agendamento; não simule essa operação nesta conversa.`;
 
 export function buildPersonalSystemPrompt(
@@ -52,6 +53,14 @@ export function isSchedulerRequest(message: string): boolean {
     .replace(/[\u0300-\u036f]/g, "");
   const scheduling = /\b(agendar|agendamento|agendamentos|marcar|remarcar|reagendar|cancelar.*(agendamento|horario)|desmarcar|mover.*(agendamento|horario)|concluir.*(agendamento|atendimento)|agenda|horarios|cliente cadastrado|servico cadastrado|profissional disponivel|faturamento do|caixa do)\b/;
   return scheduling.test(value) && !/\b(planejar|ideia de agenda|como organizar.*agenda|modelo de agenda)\b/.test(value);
+}
+
+export function isLikelyWebResearchRequest(message: string): boolean {
+  const value = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /\b(pesquis[ae]|procure|buscar na internet|na internet|na web|web|noticias?|atualizacoes?|ultimas? noticias?|hoje|agora|atualmente|tempo em|clima|cotacao|preco atual|quanto custa hoje|fonte|fontes|link|o que aconteceu|quem e o atual|qual e o atual)\b/.test(value);
 }
 
 export function buildConversationContext(messages: Array<{ role: "user" | "assistant"; content: string }>): string {
