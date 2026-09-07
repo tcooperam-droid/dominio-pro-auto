@@ -53,8 +53,8 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
     const normalized = email.trim().toLowerCase();
     setError("");
     setMessage("");
-    if (!isAllowedWorkEmail(normalized) || !/^\d{6}$/.test(code.trim())) {
-      setError("Digite o código de 6 números recebido por e-mail.");
+    if (!isAllowedWorkEmail(normalized) || !/^\d{8}$/.test(code.trim())) {
+      setError("Digite o código de 8 números recebido por e-mail.");
       return;
     }
     setVerifying(true);
@@ -101,14 +101,14 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
         </div>
         {codeSent && (
           <>
-            <label className="mt-5 block text-xs font-semibold uppercase tracking-wider text-white/50">Código de 6 números</label>
+            <label className="mt-5 block text-xs font-semibold uppercase tracking-wider text-white/50">Código de 8 números</label>
             <input
               value={code}
-              onChange={event => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              onChange={event => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
+              maxLength={8}
               autoFocus
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-center text-xl tracking-[0.4em] outline-none"
               placeholder="000000"
@@ -131,7 +131,7 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
             <button
               type="button"
               onClick={() => void verifyCode()}
-              disabled={verifying || code.length !== 6}
+              disabled={verifying || code.length !== 8}
               className="flex-1 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-black transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {verifying ? "Confirmando..." : "Confirmar código"}
