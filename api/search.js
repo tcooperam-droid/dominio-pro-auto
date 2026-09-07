@@ -1,3 +1,5 @@
+import { requireAuthorizedUser } from "./_auth.js";
+
 // Vercel Serverless Function — pesquisa na internet via Tavily API
 // Tavily é uma API de busca feita para agentes IA, com cota grátis de 1000/mês.
 // Configure a chave na Vercel: Settings → Environment Variables → TAVILY_API_KEY
@@ -7,6 +9,8 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!await requireAuthorizedUser(req, res)) return;
 
   const apiKey = process.env.TAVILY_API_KEY;
   if (!apiKey) {

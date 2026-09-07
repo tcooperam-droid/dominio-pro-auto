@@ -19,7 +19,7 @@ import { servicesStore, type Service } from "../features/servicos";
 import { employeesStore, type Employee } from "../features/funcionarios";
 import { appointmentsStore, type Appointment, type AppointmentService } from "../features/agenda";
 import { cashSessionsStore } from "../features/financeiro";
-import { createAgentHeaders, getAgentEndpoint, usesServerAgentEndpoint } from "../features/assistente/llmEndpoint";
+import { createAuthenticatedAgentHeaders, getAgentEndpoint, usesServerAgentEndpoint } from "../features/assistente/llmEndpoint";
 import {
   calcPeriodStats,
   calcRevenueByEmployee,
@@ -640,9 +640,9 @@ async function callLLM(
   const tmr = setTimeout(() => ctrl.abort(), 25_000);
 
   const endpoint = getAgentEndpoint(config.apiEndpoint);
-  const headers = createAgentHeaders(endpoint, config.apiToken);
+  const headers = await createAuthenticatedAgentHeaders(endpoint, config.apiToken);
   if (!usesServerAgentEndpoint(config.apiEndpoint) && !config.apiToken) {
-      throw new Error("Token do provedor de IA ausente. Configure VITE_LLM_API_KEY no arquivo .env.");
+      throw new Error("Proxy seguro do agente indisponível. Verifique a configuração server-side da Vercel.");
   }
 
   // Retry automático — até 2 tentativas com backoff
@@ -1458,11 +1458,11 @@ export async function testAgentV2Connection(
   try {
     const endpoint = getAgentEndpoint();
     if (!usesServerAgentEndpoint() && !token) {
-      return { ok: false, message: "Token do provedor ausente. Configure VITE_LLM_API_KEY ou informe uma chave nas configurações." };
+      return { ok: false, message: "Proxy seguro do agente indisponível. Verifique a configuração server-side da Vercel." };
     }
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: createAgentHeaders(endpoint, token),
+      headers: await createAuthenticatedAgentHeaders(endpoint, token),
       body: JSON.stringify({
         model: "gpt-5-mini",
         messages: [{ role: "user", content: "OK" }],

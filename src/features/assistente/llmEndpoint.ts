@@ -1,3 +1,5 @@
+import { supabase } from "../../lib/supabase";
+
 export const DIRECT_LLM_ENDPOINT =
   (import.meta.env.VITE_LLM_API_URL as string | undefined) ||
   "https://api.openai.com/v1/chat/completions";
@@ -18,6 +20,16 @@ export function createAgentHeaders(endpoint: string, token?: string): Record<str
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (endpoint === DIRECT_LLM_ENDPOINT && token) {
     headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+export async function createAuthenticatedAgentHeaders(endpoint: string, token?: string): Promise<Record<string, string>> {
+  const headers = createAgentHeaders(endpoint, token);
+  if (usesServerAgentEndpoint(endpoint)) {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session?.access_token) throw new Error("Sessão autenticada obrigatória.");
+    headers.Authorization = `Bearer ${data.session.access_token}`;
   }
   return headers;
 }

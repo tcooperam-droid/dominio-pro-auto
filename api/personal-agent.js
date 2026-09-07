@@ -1,3 +1,5 @@
+import { requireAuthorizedUser } from "./_auth.js";
+
 const DEFAULT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_MODEL = "openai/gpt-oss-20b";
 
@@ -11,6 +13,8 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!await requireAuthorizedUser(req, res)) return;
 
   const token = process.env.PERSONAL_LLM_API_KEY;
   const endpoint = process.env.PERSONAL_LLM_API_URL || DEFAULT_ENDPOINT;

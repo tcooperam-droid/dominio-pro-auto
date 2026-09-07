@@ -1,3 +1,5 @@
+import { requireAuthorizedUser } from "./_auth.js";
+
 const DEFAULT_LLM_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-5-mini";
 
@@ -11,6 +13,8 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!await requireAuthorizedUser(req, res)) return;
 
   const token = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY;
   const endpoint = process.env.LLM_API_URL || process.env.OPENAI_API_URL || DEFAULT_LLM_ENDPOINT;

@@ -1,3 +1,5 @@
+import { requireAuthorizedUser } from "./_auth.js";
+
 const DEFAULT_MODEL = "gemini-3.8-flash";
 
 function readBody(req) {
@@ -63,6 +65,8 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+
+  if (!await requireAuthorizedUser(req, res)) return;
 
   const apiKey = process.env.LLM_API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) {

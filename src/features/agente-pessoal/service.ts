@@ -1,4 +1,4 @@
-import { createAgentHeaders, getAgentEndpoint } from "@/features/assistente/llmEndpoint";
+import { createAuthenticatedAgentHeaders, getAgentEndpoint } from "@/features/assistente/llmEndpoint";
 import { getSession } from "@/lib/access";
 import { addFeedback, addGoal, addInstruction, appendSummary, completeGoal, loadConversation, loadMemory, rememberFact, saveConversation } from "./memory";
 import { buildConversationContext, buildPersonalSystemPrompt, extractFactCommand, extractGoalCommand, extractTeachingInstruction, isLikelyWebResearchRequest, isSchedulerRequest } from "./prompt";
@@ -63,7 +63,7 @@ async function callPersonalLLM(scope: string, message: string): Promise<{ text: 
     : endpoint;
   const response = await fetch(requestEndpoint, {
     method: "POST",
-    headers: createAgentHeaders(requestEndpoint, config.apiToken),
+    headers: await createAuthenticatedAgentHeaders(requestEndpoint, config.apiToken),
     body: JSON.stringify({
       model: config.model || PERSONAL_AGENT_MODEL,
       messages: [

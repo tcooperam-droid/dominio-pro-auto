@@ -6,35 +6,21 @@
  *   - transcribeAudio: voz → texto via Web Speech API do navegador
  *   - speakWithOpenAI: texto → voz via Web Speech API do navegador
  *
- * Produção: usa /api/agent com token server-side. Desenvolvimento: aceita VITE_LLM_API_KEY ou token local.
+ * Produção: usa /api/agent com credencial server-side.
  */
 
-import { createAgentHeaders, DIRECT_LLM_ENDPOINT, getAgentEndpoint } from "../features/assistente/llmEndpoint";
+import { createAuthenticatedAgentHeaders, DIRECT_LLM_ENDPOINT, getAgentEndpoint } from "../features/assistente/llmEndpoint";
 
 function getToken(): string {
-  // 1. Build-time env var (Vercel / local .env)
-  const envToken = (import.meta.env.VITE_LLM_API_KEY as string | undefined) ||
-    (import.meta.env.VITE_GITHUB_TOKEN as string | undefined);
-  if (envToken) return envToken;
-
-  // 2. Runtime fallback: user-configured token stored in localStorage
-  try {
-    const saved = localStorage.getItem("salon_config");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.githubToken) return parsed.githubToken as string;
-    }
-  } catch {}
-
   throw new Error(
-    "Chave do provedor de IA não configurada. Acesse Configurações → Agente IA e informe a chave.",
+    "O agente deve ser acessado pelo proxy seguro do servidor.",
   );
 }
 
-function getLlmRequest(): { endpoint: string; headers: Record<string, string> } {
+async function getLlmRequest(): Promise<{ endpoint: string; headers: Record<string, string> }> {
   const endpoint = getAgentEndpoint();
   const token = endpoint === DIRECT_LLM_ENDPOINT ? getToken() : undefined;
-  return { endpoint, headers: createAgentHeaders(endpoint, token) };
+  return { endpoint, headers: await createAuthenticatedAgentHeaders(endpoint, token) };
 }
 
 // ─── Vision ────────────────────────────────────────────────
@@ -47,7 +33,7 @@ export async function describeImage(
     prompt?.trim() ||
     "Analise esta imagem e descreva o que vê em português brasileiro. Se for um comprovante, recibo, agenda ou documento, extraia as informações relevantes.";
 
-  const { endpoint, headers } = getLlmRequest();
+  const { endpoint, headers } = await getLlmRequest();
   const res = await fetch(endpoint, {
     method: "POST",
     headers,
@@ -95,7 +81,7 @@ export async function searchWeb(query: string, limit = 5): Promise<WebResult[]> 
 
   const res = await fetch("/api/search", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await createAuthenticatedAgentHeaders("/api/search"),
     body: JSON.stringify({ query: q, limit }),
   });
 
@@ -130,7 +116,7 @@ export async function searchAndSummarize(query: string): Promise<string> {
     .join("\n\n");
 
   try {
-    const { endpoint, headers } = getLlmRequest();
+    const { endpoint, headers } = await getLlmRequest();
     const res = await fetch(endpoint, {
       method: "POST",
       headers,

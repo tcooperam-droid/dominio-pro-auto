@@ -18,9 +18,8 @@ const supabaseKey = configuredKey ?? "preview-anon-key";
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Garante sessão anônima antes de qualquer query quando o Supabase está configurado.
-// A Promise é compartilhada durante o bootstrap e reiniciada se houver falha,
-// permitindo uma nova tentativa sem exigir reload do navegador.
+// A sessão é criada pelo fluxo de login e validada pelo AuthGate. Não criar
+// sessões anônimas: elas não representam uma identidade confiável para o RLS.
 let sessionPromise: Promise<void> | null = null;
 
 export function ensureSupabaseSession(): Promise<void> {
@@ -30,10 +29,7 @@ export function ensureSupabaseSession(): Promise<void> {
   sessionPromise = (async () => {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError) throw sessionError;
-    if (!session) {
-      const { error } = await supabase.auth.signInAnonymously();
-      if (error) throw error;
-    }
+    if (!session) return;
   })().catch((error) => {
     sessionPromise = null;
     throw error;

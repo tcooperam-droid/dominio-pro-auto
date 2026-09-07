@@ -16,7 +16,6 @@ import { Settings, Building2, Clock, Bell, Palette, Save, ImagePlus, Trash2, Sci
 import { employeesStore } from "@/features/funcionarios";
 import { applyAccentColor } from "@/contexts/ThemeContext";
 import { testAgentV2Connection, initAgentV2 } from "@/lib/agentV2";
-import { usesServerAgentEndpoint } from "@/features/assistente/llmEndpoint";
 
 type BgType = "default" | "solid" | "gradient" | "image";
 
@@ -39,7 +38,6 @@ interface SalonConfig {
   bgGradientTo: string;
   bgGradientDir: string;
   bgImageUrl: string;
-  githubToken: string;
 }
 
 const DEFAULT_CONFIG: SalonConfig = {
@@ -61,7 +59,6 @@ const DEFAULT_CONFIG: SalonConfig = {
   bgGradientTo: "#1a0929",
   bgGradientDir: "135deg",
   bgImageUrl: "",
-  githubToken: "",
 };
 
 const GRADIENT_PRESETS = [
@@ -83,22 +80,15 @@ export default function ConfiguracoesPage() {
   const [agentTestMsg, setAgentTestMsg] = useState("");
 
   const handleTestAgent = async () => {
-    const envToken = (import.meta.env as any).VITE_LLM_API_KEY ?? (import.meta.env as any).VITE_GITHUB_TOKEN ?? "";
-    const token = config.githubToken || envToken;
-    if (!token && !usesServerAgentEndpoint()) {
-      setAgentTest("error");
-      setAgentTestMsg("Insira o token acima antes de testar.");
-      return;
-    }
     setAgentTest("testing");
     try {
-      const result = await testAgentV2Connection(token);
+      const result = await testAgentV2Connection();
       setAgentTest(result.ok ? "ok" : "error");
       setAgentTestMsg(result.message);
       if (result.ok) {
         initAgentV2({
-          apiToken: token,
-          apiEndpoint: usesServerAgentEndpoint() ? "/api/agent" : undefined,
+          apiToken: "",
+          apiEndpoint: "/api/agent",
           model: "gpt-5-mini",
           salonName: config.salonName,
         });
@@ -660,27 +650,9 @@ export default function ConfiguracoesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            O Agente IA usa um provedor compatível com a API da OpenAI. Em produção, o app usa o proxy seguro configurado na Vercel; a chave abaixo é necessária apenas para desenvolvimento local ou para substituir o proxy.
+            O Agente IA usa exclusivamente o proxy seguro da Vercel. A chave do
+            provedor nunca é solicitada nem armazenada neste navegador.
           </p>
-          <div className="space-y-1">
-            <Label>Chave local do provedor (opcional)</Label>
-            <div className="relative">
-              <Input
-                type={showPwd["agent_token"] ? "text" : "password"}
-                placeholder="sk-xxxxxxxxxxxxxxxxxxxx"
-                value={config.githubToken}
-                onChange={e => { updateConfig("githubToken", e.target.value); setAgentTest("idle"); }}
-                className="pr-10 font-mono text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => toggleShowPwd("agent_token")}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                {showPwd["agent_token"] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
           <div className="flex items-center gap-3 flex-wrap">
             <Button
               type="button"
@@ -705,7 +677,7 @@ export default function ConfiguracoesPage() {
             )}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Em produção, configure <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">LLM_API_KEY</code> e, se necessário, <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">LLM_API_URL</code> na Vercel. No desenvolvimento local, use o campo acima e clique em <strong>Salvar</strong>.
+            O teste verifica a sessão autenticada e a disponibilidade do serviço privado.
           </p>
         </CardContent>
       </Card>

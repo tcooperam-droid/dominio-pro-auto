@@ -7,8 +7,6 @@ const PERSONAL_AGENT_MODEL = "openai/gpt-oss-20b";
 
 interface SalonConfig {
   salonName?: string;
-  llmToken?: string;
-  githubToken?: string;
 }
 
 function readSalonConfig(): SalonConfig {
@@ -25,12 +23,8 @@ export function initializeAgent(): void {
   try {
     const config = readSalonConfig();
     const salonName = config.salonName || DEFAULT_SALON_NAME;
-    const apiToken = config.llmToken || config.githubToken ||
-      (import.meta.env.VITE_LLM_API_KEY as string) ||
-      (import.meta.env.VITE_GITHUB_TOKEN as string) || "";
-
     initAgentV2({
-      apiToken,
+      apiToken: "",
       model: DEFAULT_MODEL,
       salonName,
       businessContext: `${salonName} — Sistema de gestão para salões e barbearias.`,
