@@ -83,7 +83,7 @@ export default function ConfiguracoesPage() {
   const [agentTestMsg, setAgentTestMsg] = useState("");
 
   const handleTestAgent = async () => {
-    const envToken = (import.meta.env as any).VITE_GITHUB_TOKEN ?? "";
+    const envToken = (import.meta.env as any).VITE_LLM_API_KEY ?? (import.meta.env as any).VITE_GITHUB_TOKEN ?? "";
     const token = config.githubToken || envToken;
     if (!token && !usesServerAgentEndpoint()) {
       setAgentTest("error");
@@ -99,7 +99,7 @@ export default function ConfiguracoesPage() {
         initAgentV2({
           apiToken: token,
           apiEndpoint: usesServerAgentEndpoint() ? "/api/agent" : undefined,
-          model: "openai/gpt-4o-mini",
+          model: "gpt-5-mini",
           salonName: config.salonName,
         });
       }
@@ -660,14 +660,14 @@ export default function ConfiguracoesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            O Agente IA usa a API <strong>GitHub Models</strong>. Em produção, o app usa o proxy seguro configurado na Vercel; o token abaixo é necessário apenas para desenvolvimento local ou para substituir o proxy.
+            O Agente IA usa um provedor compatível com a API da OpenAI. Em produção, o app usa o proxy seguro configurado na Vercel; a chave abaixo é necessária apenas para desenvolvimento local ou para substituir o proxy.
           </p>
           <div className="space-y-1">
-            <Label>Token local (opcional)</Label>
+            <Label>Chave local do provedor (opcional)</Label>
             <div className="relative">
               <Input
                 type={showPwd["agent_token"] ? "text" : "password"}
-                placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                placeholder="sk-xxxxxxxxxxxxxxxxxxxx"
                 value={config.githubToken}
                 onChange={e => { updateConfig("githubToken", e.target.value); setAgentTest("idle"); }}
                 className="pr-10 font-mono text-xs"
@@ -705,7 +705,7 @@ export default function ConfiguracoesPage() {
             )}
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Em produção, configure <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">GITHUB_MODELS_TOKEN</code> na Vercel e não salve tokens no navegador. No desenvolvimento local, use o campo acima e clique em <strong>Salvar</strong>.
+            Em produção, configure <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">LLM_API_KEY</code> e, se necessário, <code className="px-1 py-0.5 rounded bg-secondary text-[11px]">LLM_API_URL</code> na Vercel. No desenvolvimento local, use o campo acima e clique em <strong>Salvar</strong>.
           </p>
         </CardContent>
       </Card>

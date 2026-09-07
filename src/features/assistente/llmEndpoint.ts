@@ -1,8 +1,10 @@
-export const DIRECT_LLM_ENDPOINT = "https://models.github.ai/inference/chat/completions";
+export const DIRECT_LLM_ENDPOINT =
+  (import.meta.env.VITE_LLM_API_URL as string | undefined) ||
+  "https://api.openai.com/v1/chat/completions";
 
 /**
  * Em produção, usa o proxy serverless para manter o token fora do bundle.
- * Em desenvolvimento, preserva o fallback direto para facilitar testes locais.
+ * Em desenvolvimento, usa o endpoint OpenAI-compatible configurado no .env.
  */
 export function getAgentEndpoint(configuredEndpoint?: string): string {
   return (

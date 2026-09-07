@@ -1,4 +1,5 @@
-const GITHUB_MODELS_ENDPOINT = "https://models.github.ai/inference/chat/completions";
+const DEFAULT_LLM_ENDPOINT = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_MODEL = "gpt-5-mini";
 
 function readBody(req) {
   if (!req.body) return {};
@@ -11,15 +12,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // `NEXT_PUBLIC_GITHUB_TOKEN` é mantido apenas como fallback de migração
-  // para o projeto Vercel legado; o frontend nunca lê essa variável.
-  const token =
-    process.env.GITHUB_MODELS_TOKEN ||
-    process.env.GITHUB_TOKEN ||
-    process.env.NEXT_PUBLIC_GITHUB_TOKEN;
+  const token = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY;
+  const endpoint = process.env.LLM_API_URL || process.env.OPENAI_API_URL || DEFAULT_LLM_ENDPOINT;
   if (!token) {
     return res.status(500).json({
-      error: "GITHUB_MODELS_TOKEN não configurado no ambiente do servidor.",
+      error: "LLM_API_KEY ou OPENAI_API_KEY não configurada no ambiente do servidor.",
     });
   }
 
@@ -35,14 +32,14 @@ export default async function handler(req, res) {
   }
 
   const payload = {
-    model: typeof body.model === "string" ? body.model : "openai/gpt-4o-mini",
+    model: typeof body.model === "string" ? body.model : DEFAULT_MODEL,
     messages: body.messages,
     temperature: typeof body.temperature === "number" ? body.temperature : 0.2,
     max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1200, 1), 4000),
   };
 
   try {
-    const upstream = await fetch(GITHUB_MODELS_ENDPOINT, {
+    const upstream = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -53,9 +50,16 @@ export default async function handler(req, res) {
 
     const text = await upstream.text();
     res.setHeader("Cache-Control", "no-store");
-    res.status(upstream.status);
     res.setHeader("Content-Type", "application/json");
 
+    if (upstream.status === 410) {
+      return res.status(502).json({
+        error: "O provedor de IA configurado foi descontinuado (HTTP 410). Atualize LLM_API_URL/LLM_API_KEY e publique novamente.",
+        code: "provider_retired",
+      });
+    }
+
+    res.status(upstream.status);
     try {
       return res.send(text);
     } catch {
@@ -63,7 +67,7 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     return res.status(502).json({
-      error: "Falha ao chamar o GitHub Models.",
+      error: "Falha ao chamar o provedor de IA.",
       details: String(error?.message || error).slice(0, 300),
     });
   }

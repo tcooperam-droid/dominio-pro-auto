@@ -62,7 +62,7 @@ export interface SchedulerBridge {
   }>;
 }
 
-export const PERSONAL_AGENT_MODEL = "openai/gpt-4o-mini";
+export const PERSONAL_AGENT_MODEL = "gpt-5-mini";
 export const PERSONAL_AGENT_SCOPE = "personal-agent";
 export const PERSONAL_AGENT_MAX_HISTORY = 24;
 

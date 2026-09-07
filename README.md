@@ -36,7 +36,7 @@ src/
 O agente pessoal fica em `src/features/agente-pessoal/`. Ele é uma camada de propósito geral, com memória, objetivos e feedback, e encaminha operações da agenda para o `agentV2` por meio de uma ponte tipada. A avaliação detalhada e os limites de treinamento estão em [`docs/AGENTE-PESSOAL.md`](docs/AGENTE-PESSOAL.md).
 
 api/
-├── agent.js                 # Proxy server-side para GitHub Models
+├── agent.js                 # Proxy server-side para um provedor OpenAI-compatible
 └── search.js                # Proxy server-side para Tavily
 ```
 
@@ -57,29 +57,31 @@ O servidor local fica disponível em `http://localhost:5173`.
 
 ## Variáveis de ambiente
 
-Para produção, configure os valores no provedor de hospedagem. O segredo do GitHub Models deve ser configurado como `GITHUB_MODELS_TOKEN`, sem o prefixo `VITE_`, para que permaneça no servidor e seja usado por `api/agent.js`.
+Para produção, configure os valores no provedor de hospedagem. A chave do provedor compatível com OpenAI deve ser configurada como `LLM_API_KEY`, sem o prefixo `VITE_`, para que permaneça no servidor e seja usada por `api/agent.js`. O endpoint padrão é o da OpenAI; para Azure, OpenRouter ou outro provedor compatível, configure também `LLM_API_URL`.
 
 | Variável | Uso | Onde configurar |
 |---|---|---|
-| `GITHUB_MODELS_TOKEN` | Token privado usado pelo proxy do agente | Vercel ou outro ambiente server-side |
+| `LLM_API_KEY` | Chave privada usada pelo proxy do agente | Vercel ou outro ambiente server-side |
+| `LLM_API_URL` | Endpoint opcional `.../chat/completions` do provedor | Vercel ou outro ambiente server-side |
 | `TAVILY_API_KEY` | Token privado da pesquisa web | Vercel ou outro ambiente server-side |
 | `VITE_SUPABASE_URL` | URL do projeto Supabase | `.env` local e variáveis do deploy |
 | `VITE_SUPABASE_ANON_KEY` | Chave pública anon do Supabase | `.env` local e variáveis do deploy |
-| `VITE_GITHUB_TOKEN` | Fallback direto para desenvolvimento local | Somente local; não recomendado em produção |
+| `VITE_LLM_API_KEY` | Chave para desenvolvimento local | Somente local; não recomendado em produção |
+| `VITE_LLM_API_URL` | Endpoint OpenAI-compatible para desenvolvimento local | Somente local |
 | `VITE_AGENT_API_URL` | Endpoint customizado opcional do agente | Somente quando necessário |
 
 A chave anon do Supabase pode ser usada no frontend, mas as tabelas precisam estar protegidas por políticas RLS adequadas no projeto Supabase. O código não contém a chave privada do banco.
 
 ## Agente de IA
 
-Em produção, o chat, a análise de imagens e o resumo de pesquisas usam `/api/agent`, que encaminha as requisições ao GitHub Models sem expor o token no bundle do navegador. Em desenvolvimento local, o agente usa o endpoint direto apenas quando `VITE_GITHUB_TOKEN` estiver configurado ou quando um token local for salvo nas configurações.
+Em produção, o chat, a análise de imagens e o resumo de pesquisas usam `/api/agent`, que encaminha as requisições ao provedor configurado sem expor a chave no bundle do navegador. Em desenvolvimento local, o agente usa o endpoint direto apenas quando `VITE_LLM_API_KEY` estiver configurado ou quando uma chave local for salva nas configurações.
 
 O agente oferece consulta de dados, criação e alteração de agendamentos, criação de clientes, análise de imagens, pesquisa web e síntese de voz pelo navegador. A pesquisa web utiliza `/api/search` e exige `TAVILY_API_KEY` no ambiente server-side.
 
 ## Publicação na Vercel
 
 1. Importe o repositório na Vercel.
-2. Configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `GITHUB_MODELS_TOKEN` e, se desejar pesquisa web, `TAVILY_API_KEY`.
+2. Configure `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `LLM_API_KEY` e, se desejar, `LLM_API_URL` e `TAVILY_API_KEY`.
 3. Execute o build `npm run build`.
 4. Publique o projeto. O `vercel.json` direciona as rotas da SPA para `index.html`, enquanto as funções em `api/` permanecem acessíveis.
 5. Confirme no Supabase se as políticas RLS permitem as operações esperadas pelo usuário anônimo ou autenticado usado pelo aplicativo.

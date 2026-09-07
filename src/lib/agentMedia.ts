@@ -1,19 +1,20 @@
 /**
- * agentMedia.ts — Capacidades multimídia do Agente (versão GitHub Models + Vercel API).
+ * agentMedia.ts — Capacidades multimídia do Agente (gateway OpenAI-compatible + Vercel API).
  *
- *   - describeImage  : visão por imagem via GitHub Models (gpt-4o-mini)
+ *   - describeImage  : visão por imagem via gateway OpenAI-compatible (gpt-5-mini)
  *   - searchWeb      : pesquisa via /api/search (Vercel serverless function)
  *   - transcribeAudio: voz → texto via Web Speech API do navegador
  *   - speakWithOpenAI: texto → voz via Web Speech API do navegador
  *
- * Produção: usa /api/agent com token server-side. Desenvolvimento: aceita VITE_GITHUB_TOKEN ou token local.
+ * Produção: usa /api/agent com token server-side. Desenvolvimento: aceita VITE_LLM_API_KEY ou token local.
  */
 
 import { createAgentHeaders, DIRECT_LLM_ENDPOINT, getAgentEndpoint } from "../features/assistente/llmEndpoint";
 
 function getToken(): string {
   // 1. Build-time env var (Vercel / local .env)
-  const envToken = import.meta.env.VITE_GITHUB_TOKEN as string | undefined;
+  const envToken = (import.meta.env.VITE_LLM_API_KEY as string | undefined) ||
+    (import.meta.env.VITE_GITHUB_TOKEN as string | undefined);
   if (envToken) return envToken;
 
   // 2. Runtime fallback: user-configured token stored in localStorage
@@ -26,7 +27,7 @@ function getToken(): string {
   } catch {}
 
   throw new Error(
-    "GitHub token não configurado. Acesse Configurações → Agente IA e insira seu token.",
+    "Chave do provedor de IA não configurada. Acesse Configurações → Agente IA e informe a chave.",
   );
 }
 
@@ -51,7 +52,7 @@ export async function describeImage(
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: "openai/gpt-4o-mini",
+      model: "gpt-5-mini",
       max_tokens: 1024,
       temperature: 0.3,
       messages: [
@@ -134,7 +135,7 @@ export async function searchAndSummarize(query: string): Promise<string> {
       method: "POST",
       headers,
       body: JSON.stringify({
-        model: "openai/gpt-4o-mini",
+        model: "gpt-5-mini",
         max_tokens: 600,
         temperature: 0.4,
         messages: [

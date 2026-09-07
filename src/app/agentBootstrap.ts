@@ -2,10 +2,11 @@ import { initAgentV2 } from "../lib/agentV2";
 import { initPersonalAgent } from "../features/agente-pessoal";
 
 const DEFAULT_SALON_NAME = "Domínio Pro";
-const DEFAULT_MODEL = "openai/gpt-4o-mini";
+const DEFAULT_MODEL = "gpt-5-mini";
 
 interface SalonConfig {
   salonName?: string;
+  llmToken?: string;
   githubToken?: string;
 }
 
@@ -23,7 +24,9 @@ export function initializeAgent(): void {
   try {
     const config = readSalonConfig();
     const salonName = config.salonName || DEFAULT_SALON_NAME;
-    const apiToken = config.githubToken || (import.meta.env.VITE_GITHUB_TOKEN as string) || "";
+    const apiToken = config.llmToken || config.githubToken ||
+      (import.meta.env.VITE_LLM_API_KEY as string) ||
+      (import.meta.env.VITE_GITHUB_TOKEN as string) || "";
 
     initAgentV2({
       apiToken,

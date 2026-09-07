@@ -642,7 +642,7 @@ async function callLLM(
   const endpoint = getAgentEndpoint(config.apiEndpoint);
   const headers = createAgentHeaders(endpoint, config.apiToken);
   if (!usesServerAgentEndpoint(config.apiEndpoint) && !config.apiToken) {
-    throw new Error("GitHub token ausente. Configure VITE_GITHUB_TOKEN no arquivo .env.");
+      throw new Error("Token do provedor de IA ausente. Configure VITE_LLM_API_KEY no arquivo .env.");
   }
 
   // Retry automático — até 2 tentativas com backoff
@@ -654,7 +654,7 @@ async function callLLM(
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: config.model ?? "openai/gpt-4o-mini",
+          model: config.model ?? "gpt-5-mini",
           messages,
           temperature: 0.2,
           max_tokens: 1200,
@@ -669,7 +669,7 @@ async function callLLM(
         if (res.status === 429)
           throw new Error("Limite de requisições atingido. Aguarde alguns segundos.");
         if (res.status === 410)
-          throw new Error("O serviço GitHub Models está temporariamente indisponível (HTTP 410).");
+          throw new Error("O provedor de IA configurado foi descontinuado (HTTP 410). Atualize o endpoint e a chave do provedor.");
         throw new Error(`Erro ${res.status}`);
       }
 
@@ -678,7 +678,7 @@ async function callLLM(
     } catch (err) {
       lastErr = err;
       if (err instanceof DOMException && err.name === "AbortError") break; // timeout não faz retry
-      if ((err as any)?.message?.includes("401") || (err as any)?.message?.includes("410")) break; // auth/indisponibilidade não fazem retry
+      if ((err as any)?.message?.includes("401") || (err as any)?.message?.includes("410")) break; // auth/provedor aposentado não fazem retry
     }
   }
   clearTimeout(tmr);
@@ -1458,13 +1458,13 @@ export async function testAgentV2Connection(
   try {
     const endpoint = getAgentEndpoint();
     if (!usesServerAgentEndpoint() && !token) {
-      return { ok: false, message: "GitHub token ausente. Configure VITE_GITHUB_TOKEN ou informe um token nas configurações." };
+      return { ok: false, message: "Token do provedor ausente. Configure VITE_LLM_API_KEY ou informe uma chave nas configurações." };
     }
     const res = await fetch(endpoint, {
       method: "POST",
       headers: createAgentHeaders(endpoint, token),
       body: JSON.stringify({
-        model: "openai/gpt-4o-mini",
+        model: "gpt-5-mini",
         messages: [{ role: "user", content: "OK" }],
         max_tokens: 5,
       }),
@@ -1472,7 +1472,7 @@ export async function testAgentV2Connection(
     if (!res.ok)
       return {
         ok: false,
-        message: res.status === 401 ? "Token inválido." : `Erro ${res.status}`,
+        message: res.status === 401 ? "Chave inválida." : res.status === 410 ? "O provedor configurado foi descontinuado (HTTP 410)." : `Erro ${res.status}`,
       };
     return { ok: true, message: "Conexão OK! Agente IA ativado." };
   } catch (err) {

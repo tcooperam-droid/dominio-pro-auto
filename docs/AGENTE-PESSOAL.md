@@ -64,4 +64,4 @@ npm test
 npm run build
 ```
 
-O módulo não cria uma nova chave de API. Em produção, ele utiliza o proxy server-side `/api/agent` e a variável já documentada `GITHUB_MODELS_TOKEN`.
+O módulo não cria uma nova chave de API. Em produção, ele utiliza o proxy server-side `/api/agent`, `LLM_API_KEY` e opcionalmente `LLM_API_URL`. O GitHub Models foi aposentado e sua API retorna HTTP 410; por isso o projeto não depende mais desse serviço.
