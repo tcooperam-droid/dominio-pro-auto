@@ -3,6 +3,7 @@ import { initPersonalAgent } from "../features/agente-pessoal";
 
 const DEFAULT_SALON_NAME = "Domínio Pro";
 const DEFAULT_MODEL = "gpt-5-mini";
+const PERSONAL_AGENT_MODEL = "llama-3.3-70b-versatile";
 
 interface SalonConfig {
   salonName?: string;
@@ -36,8 +37,9 @@ export function initializeAgent(): void {
     });
 
     initPersonalAgent({
-      apiToken,
-      model: DEFAULT_MODEL,
+      apiToken: "",
+      apiEndpoint: import.meta.env.PROD ? "/api/personal-agent" : undefined,
+      model: PERSONAL_AGENT_MODEL,
       salonName,
       userName: "Ricardo",
     });
