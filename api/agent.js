@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   }
 
   const payload = {
-    model: typeof body.model === "string" ? body.model : DEFAULT_MODEL,
+    model: process.env.LLM_MODEL || (typeof body.model === "string" ? body.model : DEFAULT_MODEL),
     messages: body.messages,
     temperature: typeof body.temperature === "number" ? body.temperature : 0.2,
     max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1200, 1), 4000),

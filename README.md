@@ -63,6 +63,7 @@ Para produção, configure os valores no provedor de hospedagem. A chave do prov
 |---|---|---|
 | `LLM_API_KEY` | Chave privada usada pelo proxy do agente | Vercel ou outro ambiente server-side |
 | `LLM_API_URL` | Endpoint opcional `.../chat/completions` do provedor | Vercel ou outro ambiente server-side |
+| `LLM_MODEL` | Modelo opcional do provedor, como `gemini-3.8-flash` | Vercel ou outro ambiente server-side |
 | `TAVILY_API_KEY` | Token privado da pesquisa web | Vercel ou outro ambiente server-side |
 | `VITE_SUPABASE_URL` | URL do projeto Supabase | `.env` local e variáveis do deploy |
 | `VITE_SUPABASE_ANON_KEY` | Chave pública anon do Supabase | `.env` local e variáveis do deploy |
