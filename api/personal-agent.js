@@ -1,5 +1,5 @@
 const DEFAULT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const DEFAULT_MODEL = "openai/gpt-oss-20b";
 
 function readBody(req) {
   if (!req.body) return {};

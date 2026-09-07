@@ -3,7 +3,7 @@ import { initPersonalAgent } from "../features/agente-pessoal";
 
 const DEFAULT_SALON_NAME = "Domínio Pro";
 const DEFAULT_MODEL = "gpt-5-mini";
-const PERSONAL_AGENT_MODEL = "llama-3.3-70b-versatile";
+const PERSONAL_AGENT_MODEL = "openai/gpt-oss-20b";
 
 interface SalonConfig {
   salonName?: string;

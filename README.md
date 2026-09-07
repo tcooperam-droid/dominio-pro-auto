@@ -68,7 +68,7 @@ Para produção, configure os valores no provedor de hospedagem. A chave do prov
 | `LLM_MODEL` | Modelo opcional do provedor, como `gemini-3.8-flash` | Vercel ou outro ambiente server-side |
 | `PERSONAL_LLM_API_KEY` | Chave privada do provedor do agente pessoal | Vercel ou outro ambiente server-side |
 | `PERSONAL_LLM_API_URL` | Endpoint opcional do agente pessoal | Vercel ou outro ambiente server-side |
-| `PERSONAL_LLM_MODEL` | Modelo do agente pessoal, por padrão `llama-3.3-70b-versatile` | Vercel ou outro ambiente server-side |
+| `PERSONAL_LLM_MODEL` | Modelo do agente pessoal, por padrão `openai/gpt-oss-20b` | Vercel ou outro ambiente server-side |
 | `TAVILY_API_KEY` | Token privado da pesquisa web legada do chat principal | Vercel ou outro ambiente server-side |
 | `VITE_SUPABASE_URL` | URL do projeto Supabase | `.env` local e variáveis do deploy |
 | `VITE_SUPABASE_ANON_KEY` | Chave pública anon do Supabase | `.env` local e variáveis do deploy |
