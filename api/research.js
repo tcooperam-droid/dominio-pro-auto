@@ -36,6 +36,28 @@ function extractOutput(interaction) {
   };
 }
 
+async function searchWithTavily(messages, apiKey) {
+  const userMessage = [...messages].reverse().find((message) => message.role === "user");
+  const query = typeof userMessage?.content === "string" ? userMessage.content.trim() : "";
+  if (!query || !apiKey) return null;
+
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ query, max_results: 5, search_depth: "basic", include_answer: true }),
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const results = Array.isArray(data.results) ? data.results : [];
+  const text = data.answer || results.map((item, index) => `${index + 1}. ${item.title}\n${item.content}\n${item.url}`).join("\n\n");
+  return {
+    model: "tavily-search",
+    choices: [{ message: { role: "assistant", content: text }, finish_reason: "stop" }],
+    citations: results.filter((item) => item.url).map((item) => ({ title: item.title || item.url, url: item.url })),
+    grounded: true,
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -80,6 +102,10 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", "application/json");
 
     if (!upstream.ok) {
+      if (process.env.TAVILY_API_KEY && (upstream.status === 429 || upstream.status === 403 || upstream.status === 402)) {
+        const fallback = await searchWithTavily(body.messages, process.env.TAVILY_API_KEY);
+        if (fallback) return res.status(200).json(fallback);
+      }
       return res.status(upstream.status >= 400 && upstream.status < 600 ? upstream.status : 502).send(raw.slice(0, 2000));
     }
 
