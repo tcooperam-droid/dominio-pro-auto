@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { Redirect, Route, Switch, useLocation } from "wouter";
 import DominioLayout from "../components/DominioLayout";
 import ProfileSelector from "../components/ProfileSelector";
-import { canAccess, getDefaultRoute, getSession, isAccessControlEnabled } from "../lib/access";
+import { canAccess, getDefaultRoute, getSession } from "../lib/access";
 
 const NotFound = lazy(() => import("../pages/NotFound"));
 const DashboardPage = lazy(() => import("../pages/DashboardPage"));
@@ -20,6 +20,7 @@ const ComissoesPage = lazy(() => import("../pages/ComissoesPage"));
 const FinanceiroDashboardPage = lazy(() => import("../pages/FinanceiroDashboardPage"));
 const ContabilidadePage = lazy(() => import("../pages/ContabilidadePage"));
 const PersonalAgentPage = lazy(() => import("../pages/PersonalAgentPage"));
+const UsuariosPage = lazy(() => import("../pages/UsuariosPage"));
 
 function RouteLoading() {
   return (
@@ -31,14 +32,16 @@ function RouteLoading() {
 
 function ProtectedContent() {
   const [location] = useLocation();
-  const accessEnabled = isAccessControlEnabled();
   const session = getSession();
 
-  if (accessEnabled && !session) {
+  if (!session) {
     return <ProfileSelector />;
   }
 
-  if (accessEnabled && session && !canAccess(session.role, location)) {
+  if (!canAccess(session.role, location)) {
+    return <Redirect to={getDefaultRoute(session.role)} />;
+  }
+  if (location === "/usuarios" && session.role !== "owner") {
     return <Redirect to={getDefaultRoute(session.role)} />;
   }
 
@@ -66,6 +69,7 @@ function ProtectedContent() {
           <Route path="/relatorios" component={RelatoriosPage} />
           <Route path="/backup" component={BackupPage} />
           <Route path="/configuracoes" component={ConfiguracoesPage} />
+          <Route path="/usuarios" component={UsuariosPage} />
           <Route path="/ferramentas-clientes" component={FerramentasClientesPage} />
           <Route path="/agente-pessoal" component={PersonalAgentPage} />
           <Route path="/assistente">
@@ -80,13 +84,11 @@ function ProtectedContent() {
 
 /** Rotas protegidas e compatibilidades legadas do painel Domínio Pro. */
 export default function AppRoutes() {
-  const accessEnabled = isAccessControlEnabled();
-
   return (
     <Suspense fallback={<RouteLoading />}>
       <Switch>
         <Route path="/login">
-          {accessEnabled ? <ProfileSelector /> : <Redirect to="/dashboard" />}
+          <Redirect to="/dashboard" />
         </Route>
         <Route>
           <ProtectedContent />

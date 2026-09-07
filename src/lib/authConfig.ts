@@ -1,5 +1,18 @@
-export const AUTHORIZED_WORK_EMAIL = "tcooperam@gmail.com";
+export type AuthorizedRole = "owner" | "manager" | "employee";
 
+export interface AuthorizedUser {
+  id: string;
+  email: string;
+  display_name: string;
+  role: AuthorizedRole;
+  active: boolean;
+}
+
+export function normalizeEmail(email: string | null | undefined): string {
+  return email?.trim().toLowerCase() ?? "";
+}
+
+// A autorização real vem da tabela public.authorized_users no Supabase.
 export function isAllowedWorkEmail(email: string | null | undefined): boolean {
-  return email?.trim().toLowerCase() === AUTHORIZED_WORK_EMAIL;
+  return normalizeEmail(email).length > 0;
 }

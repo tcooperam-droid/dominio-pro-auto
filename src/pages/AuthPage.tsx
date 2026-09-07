@@ -4,7 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { isAllowedWorkEmail } from "@/lib/authConfig";
 
 export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) {
-  const [email, setEmail] = useState("tcooperam@gmail.com");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -79,14 +79,14 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
         </div>
         <h1 className="text-center text-2xl font-bold">Acesso de trabalho</h1>
         <p className="mt-2 text-center text-sm text-white/50">
-          Receba um código e confirme o acesso diretamente neste dispositivo.
+          Use o seu e-mail cadastrado para receber um código temporário de acesso.
         </p>
         {rejectedEmail && (
           <p className="mt-4 rounded-xl border border-red-400/20 bg-red-400/10 p-3 text-sm text-red-200">
             O endereço {rejectedEmail} não está autorizado neste aplicativo.
           </p>
         )}
-        <label className="mt-7 block text-xs font-semibold uppercase tracking-wider text-white/50">E-mail autorizado</label>
+        <label className="mt-7 block text-xs font-semibold uppercase tracking-wider text-white/50">Seu e-mail</label>
         <div className="mt-2 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3">
           <Mail className="h-4 w-4 text-white/40" />
           <input

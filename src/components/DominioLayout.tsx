@@ -35,6 +35,7 @@ const SECONDARY_NAV = [
   { path: "/relatorios",            label: "Relatórios",    icon: BarChart2   },
   { path: "/backup",                label: "Backup",        icon: Database    },
   { path: "/configuracoes",         label: "Configurações", icon: Settings    },
+  { path: "/usuarios",              label: "Usuários",      icon: UserCheck   },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────
@@ -293,6 +294,7 @@ export default function DominioLayout({ children, onNewAppt }: {
       "backup": "backup",
       "configuracoes": "configuracoes",
       "agente-pessoal": "agente-pessoal",
+      "usuarios": "usuarios",
     };
     return menuVis[keyMap[key] ?? key] !== false;
   });
