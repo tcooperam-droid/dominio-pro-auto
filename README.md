@@ -21,15 +21,19 @@ src/
 │   ├── servicos/            # API pública de serviços
 │   ├── financeiro/          # API pública financeira e auditoria
 │   ├── relatorios/          # API pública de consultas e análises
-│   └── assistente/          # Adaptadores do agente
+│   ├── assistente/          # Adaptadores do agente de agendamento
+│   └── agente-pessoal/      # IA geral, memória, objetivos e ponte
 ├── lib/
 │   ├── store.ts             # Fachada de compatibilidade
 │   ├── store/               # Implementações por agregado
 │   ├── analytics.ts         # Regras analíticas
 │   ├── agentV2.ts           # Orquestração do agente
-│   └── agentMedia.ts        # Imagem, pesquisa e voz
+│   ├── agentMedia.ts        # Imagem, pesquisa e voz
+│   └── agentSchedule.ts      # Regras determinísticas de data e horário
 ├── components/              # Componentes reutilizáveis
 └── pages/                   # Telas carregadas por rota
+
+O agente pessoal fica em `src/features/agente-pessoal/`. Ele é uma camada de propósito geral, com memória, objetivos e feedback, e encaminha operações da agenda para o `agentV2` por meio de uma ponte tipada. A avaliação detalhada e os limites de treinamento estão em [`docs/AGENTE-PESSOAL.md`](docs/AGENTE-PESSOAL.md).
 
 api/
 ├── agent.js                 # Proxy server-side para GitHub Models

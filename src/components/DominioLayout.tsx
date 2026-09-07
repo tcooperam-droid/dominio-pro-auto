@@ -13,7 +13,7 @@ import {
   Calendar, Users, UserCheck, Scissors, DollarSign,
   BarChart2, Settings, Database, Menu, X,
   Sun, Moon, Plus, Wrench,
-  LogOut, Receipt, Percent, TrendingUp
+  LogOut, Receipt, Percent, TrendingUp, Bot
 } from "lucide-react";
 
 // ─── Navegação ────────────────────────────────────────────
@@ -25,6 +25,7 @@ const PRIMARY_NAV = [
 ];
 
 const SECONDARY_NAV = [
+  { path: "/agente-pessoal",         label: "Agente pessoal", icon: Bot         },
   { path: "/despesas",              label: "Despesas",      icon: Receipt     },
   { path: "/comissoes",             label: "Comissões",     icon: Percent     },
   { path: "/contabilidade",         label: "Contabilidade", icon: Receipt     },
@@ -291,6 +292,7 @@ export default function DominioLayout({ children, onNewAppt }: {
       "relatorios": "relatorios",
       "backup": "backup",
       "configuracoes": "configuracoes",
+      "agente-pessoal": "agente-pessoal",
     };
     return menuVis[keyMap[key] ?? key] !== false;
   });

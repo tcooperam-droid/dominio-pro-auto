@@ -1,4 +1,5 @@
 import { initAgentV2 } from "../lib/agentV2";
+import { initPersonalAgent } from "../features/agente-pessoal";
 
 const DEFAULT_SALON_NAME = "Domínio Pro";
 const DEFAULT_MODEL = "openai/gpt-4o-mini";
@@ -29,6 +30,13 @@ export function initializeAgent(): void {
       model: DEFAULT_MODEL,
       salonName,
       businessContext: `${salonName} — Sistema de gestão para salões e barbearias.`,
+    });
+
+    initPersonalAgent({
+      apiToken,
+      model: DEFAULT_MODEL,
+      salonName,
+      userName: "Ricardo",
     });
 
     console.info("[App] Agente IA v2 inicializado.");

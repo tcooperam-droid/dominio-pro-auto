@@ -40,6 +40,7 @@ export const MENU_VISIBILITY: Record<UserRole, Record<string, boolean>> = {
     despesas: true,
     comissoes: true,
     financeiro: true,
+    "agente-pessoal": true,
   },
   manager: {
     dashboard: true,
@@ -56,6 +57,7 @@ export const MENU_VISIBILITY: Record<UserRole, Record<string, boolean>> = {
     despesas: true,
     comissoes: true,
     financeiro: true,
+    "agente-pessoal": true,
   },
   employee: {
     dashboard: false,
@@ -72,6 +74,7 @@ export const MENU_VISIBILITY: Record<UserRole, Record<string, boolean>> = {
     despesas: false,
     comissoes: false,
     financeiro: false,
+    "agente-pessoal": false,
   },
 };
 
