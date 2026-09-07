@@ -26,7 +26,7 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
     setError("");
     setMessage("");
     if (!isAllowedWorkEmail(normalized)) {
-      setError("Este acesso está reservado ao e-mail autorizado do trabalho.");
+      setError("Informe o e-mail cadastrado pelo proprietário.");
       return;
     }
     if (cooldown) {
@@ -93,7 +93,8 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
             value={email}
             onChange={event => setEmail(event.target.value)}
             type="email"
-            autoComplete="email"
+            autoComplete="off"
+            name="authorized-user-email"
             disabled={codeSent}
             className="w-full bg-transparent py-3 text-sm outline-none disabled:opacity-60"
             placeholder="seu@email.com"
@@ -111,7 +112,7 @@ export default function AuthPage({ rejectedEmail }: { rejectedEmail?: string }) 
               maxLength={8}
               autoFocus
               className="mt-2 w-full rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-center text-xl tracking-[0.4em] outline-none"
-              placeholder="000000"
+              placeholder="00000000"
             />
           </>
         )}

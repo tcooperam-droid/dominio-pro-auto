@@ -1,7 +1,7 @@
 // sw.js — Service Worker para Domínio Pro PWA
 // Garante que todas as rotas SPA funcionem offline e após background
 
-const CACHE_NAME = "dominio-pro-v2";
+const CACHE_NAME = "dominio-pro-v3-multiuser";
 
 // Arquivos essenciais para o shell do app funcionar offline
 const SHELL_ASSETS = [
