@@ -9,7 +9,10 @@ export async function requireAuthorizedUser(req, res) {
     res.status(401).json({ error: "Sessão autenticada obrigatória." });
     return null;
   }
-  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  const supabase = createClient(url, key, {
+    auth: { persistSession: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
   const { data: authData, error: authError } = await supabase.auth.getUser(accessToken);
   const email = authData.user?.email?.trim().toLowerCase();
   if (authError || !email) {
