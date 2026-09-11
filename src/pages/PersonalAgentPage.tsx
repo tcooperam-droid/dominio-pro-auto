@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { usePersonalAgent } from "@/features/agente-pessoal/usePersonalAgent";
 import type { PersonalMessage } from "@/features/agente-pessoal/types";
+import { Streamdown } from "streamdown";
 
 const SUGGESTIONS = [
   "Me ajude a organizar as prioridades desta semana",
@@ -31,7 +32,9 @@ function MessageBubble({ message, onRate }: { message: PersonalMessage; onRate: 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-[min(88%,760px)] rounded-2xl px-4 py-3 text-sm shadow-sm ${isUser ? "bg-primary text-primary-foreground" : "border bg-card text-card-foreground"}`}>
-        <div className="whitespace-pre-wrap leading-6">{message.content}</div>
+        <div className="leading-6 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:my-2 [&_ol]:my-2 [&_li]:ml-4 [&_strong]:font-semibold [&_a]:text-primary [&_a]:underline">
+          <Streamdown>{message.content}</Streamdown>
+        </div>
         {message.citations && message.citations.length > 0 && (
           <div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
             <div className="mb-1 font-medium">Fontes consultadas</div>

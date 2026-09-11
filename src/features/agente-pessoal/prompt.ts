@@ -51,8 +51,13 @@ export function isSchedulerRequest(message: string): boolean {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
-  const scheduling = /\b(agendar|agendamento|agendamentos|marcar|remarcar|reagendar|cancelar.*(agendamento|horario)|desmarcar|mover.*(agendamento|horario)|concluir.*(agendamento|atendimento)|agenda|horarios|cliente cadastrado|servico cadastrado|profissional disponivel|faturamento do|caixa do)\b/;
-  return scheduling.test(value) && !/\b(planejar|ideia de agenda|como organizar.*agenda|modelo de agenda)\b/.test(value);
+  if (/\b(planejar|ideia de agenda|como organizar.*agenda|modelo de agenda|identificar.*erro|corrigir|correcao|explicar|por que|porque|na verdade|voce acertou|errou)\b/.test(value)) {
+    return false;
+  }
+  const operation = /\b(agendar|marcar|remarcar|reagendar|desmarcar|cancelar|mover|concluir)\b/;
+  const lookup = /\b(quais|qual|que|temos|existe|existem|verifique|consulte|listar|liste)\b.*\b(agendamento|agendamentos|agenda|horario|horarios|cliente cadastrado|servico cadastrado|profissional disponivel)\b/;
+  const confirmation = /\b(agenda mesmo assim|confirma|confirmo|pode executar|pode fazer)\b/;
+  return operation.test(value) || lookup.test(value) || confirmation.test(value);
 }
 
 export function isLikelyWebResearchRequest(message: string): boolean {
