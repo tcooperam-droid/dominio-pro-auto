@@ -19,6 +19,7 @@ import { servicesStore, type Service } from "../features/servicos";
 import { employeesStore, type Employee } from "../features/funcionarios";
 import { appointmentsStore, type Appointment, type AppointmentService } from "../features/agenda";
 import { cashSessionsStore } from "../features/financeiro";
+import { getVisibleScreenContext } from "../features/agente-pessoal/appContext";
 import { createAuthenticatedAgentHeaders, getAgentEndpoint, usesServerAgentEndpoint } from "../features/assistente/llmEndpoint";
 import {
   calcPeriodStats,
@@ -457,7 +458,7 @@ function getFinancialSummary(scope: "dia" | "semana" | "mes"): string {
 
 async function gatherData(msg: string, history: AgentMessage[] = []): Promise<string> {
   const q = msg.toLowerCase();
-  const parts: string[] = [getTodayData(), getEmployeesData(), getServicesData()];
+  const parts: string[] = [getTodayData(), getEmployeesData(), getServicesData(), `TELA ATUAL EXIBIDA AO USUÁRIO:\n${getVisibleScreenContext()}`];
 
   // Extrair nomes candidatos do histórico recente também (últimas 6 msgs)
   const recentHistory = history.slice(-6).map(m => m.content).join(" ");

@@ -1,7 +1,8 @@
 import { createAuthenticatedAgentHeaders, getAgentEndpoint } from "@/features/assistente/llmEndpoint";
 import { getSession } from "@/lib/access";
+import { buildAppContext } from "./appContext";
 import { addFeedback, addGoal, addInstruction, appendSummary, completeGoal, loadConversation, loadMemory, rememberFact, saveConversation } from "./memory";
-import { buildConversationContext, buildPersonalSystemPrompt, extractFactCommand, extractGoalCommand, extractTeachingInstruction, isLikelyWebResearchRequest, isSchedulerRequest } from "./prompt";
+import { buildConversationContext, buildPersonalSystemPrompt, extractFactCommand, extractGoalCommand, extractTeachingInstruction, isLikelyWebResearchRequest, isSchedulerRequest, isTechnicalRequest } from "./prompt";
 import { createSchedulerBridge } from "./bridge";
 import {
   PERSONAL_AGENT_MODEL,
@@ -56,7 +57,7 @@ async function callPersonalLLM(scope: string, message: string): Promise<{ text: 
   const system = buildPersonalSystemPrompt(memory, {
     salonName: config.salonName,
     userName: config.userName || getSession()?.profileName,
-  });
+  }) + `\n\n${buildAppContext()}`;
   const research = isLikelyWebResearchRequest(message);
   const requestEndpoint = research
     ? (import.meta.env.PROD ? "/api/research" : "/api/research")
@@ -85,6 +86,28 @@ async function callPersonalLLM(scope: string, message: string): Promise<{ text: 
   const text = payload?.choices?.[0]?.message?.content;
   if (typeof text !== "string" || !text.trim()) throw new Error(research ? "A pesquisa não retornou uma resposta válida." : "O modelo não retornou uma resposta válida.");
   return { text: text.trim(), citations: Array.isArray(payload?.citations) ? payload.citations : undefined };
+}
+
+async function callTechnicalAgent(scope: string, message: string): Promise<string> {
+  const endpoint = "/api/technical-agent";
+  const history = loadConversation(scope).slice(-8);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: await createAuthenticatedAgentHeaders(endpoint, config?.apiToken || ""),
+    body: JSON.stringify({
+      question: message,
+      appContext: buildAppContext(),
+      messages: history.map((item) => ({ role: item.role, content: item.content })),
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = typeof payload?.error === "string" ? payload.error : `HTTP ${response.status}`;
+    throw new Error(`Não foi possível consultar o agente técnico: ${detail}`);
+  }
+  const text = payload?.choices?.[0]?.message?.content;
+  if (typeof text !== "string" || !text.trim()) throw new Error("O agente técnico não retornou uma análise válida.");
+  return text.trim();
 }
 
 function localCommandResponse(scope: string, message: string): string | null {
@@ -116,6 +139,14 @@ export async function sendPersonalMessage(text: string): Promise<PersonalAgentRe
   const message = text.trim();
   const scope = currentScope();
   if (!message) throw new Error("Digite uma mensagem antes de enviar.");
+
+  if (isTechnicalRequest(message)) {
+    const responseText = await callTechnicalAgent(scope, message);
+    const user = userMessage(message, "personal");
+    const assistant = assistantMessage(responseText, "personal");
+    saveExchange(scope, user, assistant);
+    return { text: responseText, messageId: assistant.id, routedTo: "personal", userMessage: message };
+  }
 
   if (isSchedulerRequest(message)) {
     const result = await schedulerBridge.handleMessage(message);

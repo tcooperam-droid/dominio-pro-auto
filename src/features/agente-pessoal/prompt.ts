@@ -60,6 +60,14 @@ export function isSchedulerRequest(message: string): boolean {
   return operation.test(value) || lookup.test(value) || confirmation.test(value);
 }
 
+export function isTechnicalRequest(message: string): boolean {
+  const value = message
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  return /\b(erro|bug|falha|503|tela|codigo|programacao|desenvolvimento|seguranca|diagnostico|corrigir o app|corrigir o aplicativo|analisar o app|analisar o aplicativo|revisar o codigo|agente tecnico)\b/.test(value);
+}
+
 export function isLikelyWebResearchRequest(message: string): boolean {
   const value = message
     .toLowerCase()
