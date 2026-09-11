@@ -1,11 +1,38 @@
 import { requireAuthorizedUser } from "./_auth.js";
 
-const DEFAULT_LLM_ENDPOINT = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL = "gpt-5-mini";
+const DEFAULT_LLM_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
+const DEFAULT_MODEL = "openai/gpt-oss-20b";
 
 function readBody(req) {
   if (!req.body) return {};
   return typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+}
+
+function providerConfig(prefix = "") {
+  if (prefix === "PERSONAL_") {
+    return {
+      token: process.env.PERSONAL_LLM_API_KEY,
+      endpoint: process.env.PERSONAL_LLM_API_URL || DEFAULT_LLM_ENDPOINT,
+      model: process.env.PERSONAL_LLM_MODEL || DEFAULT_MODEL,
+    };
+  }
+  return {
+    token: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY,
+    endpoint: process.env.LLM_API_URL || process.env.OPENAI_API_URL || DEFAULT_LLM_ENDPOINT,
+    model: process.env.LLM_MODEL || DEFAULT_MODEL,
+  };
+}
+
+async function callProvider(provider, payload) {
+  const upstream = await fetch(provider.endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${provider.token}`,
+    },
+    body: JSON.stringify({ ...payload, model: provider.model }),
+  });
+  return { upstream, text: await upstream.text() };
 }
 
 export default async function handler(req, res) {
@@ -15,14 +42,6 @@ export default async function handler(req, res) {
   }
 
   if (!await requireAuthorizedUser(req, res)) return;
-
-  const token = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY;
-  const endpoint = process.env.LLM_API_URL || process.env.OPENAI_API_URL || DEFAULT_LLM_ENDPOINT;
-  if (!token) {
-    return res.status(500).json({
-      error: "LLM_API_KEY ou OPENAI_API_KEY não configurada no ambiente do servidor.",
-    });
-  }
 
   let body;
   try {
@@ -35,39 +54,46 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "messages deve ser uma lista não vazia." });
   }
 
+  const primary = providerConfig();
+  if (!primary.token) {
+    return res.status(500).json({
+      error: "LLM_API_KEY ou OPENAI_API_KEY não configurada no ambiente do servidor.",
+    });
+  }
+
   const payload = {
-    model: process.env.LLM_MODEL || (typeof body.model === "string" ? body.model : DEFAULT_MODEL),
     messages: body.messages,
     temperature: typeof body.temperature === "number" ? body.temperature : 0.2,
     max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1200, 1), 4000),
   };
 
   try {
-    const upstream = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    let result = await callProvider(primary, payload);
+    let usedFallback = false;
 
-    const text = await upstream.text();
+    // O agente de agenda usa um provedor separado, mas pode continuar operando
+    // com o provedor pessoal quando o primeiro estiver temporariamente indisponível.
+    if ((result.upstream.status === 502 || result.upstream.status === 503) && process.env.PERSONAL_LLM_API_KEY) {
+      result = await callProvider(providerConfig("PERSONAL_"), payload);
+      usedFallback = true;
+    }
+
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/json");
+    if (usedFallback) res.setHeader("X-Agent-Provider", "personal-fallback");
 
-    if (upstream.status === 410) {
+    if (result.upstream.status === 410) {
       return res.status(502).json({
-        error: "O provedor de IA configurado foi descontinuado (HTTP 410). Atualize LLM_API_URL/LLM_API_KEY e publique novamente.",
+        error: "O provedor de IA configurado foi descontinuado (HTTP 410). Atualize as variáveis do agente e publique novamente.",
         code: "provider_retired",
       });
     }
 
-    res.status(upstream.status);
+    res.status(result.upstream.status);
     try {
-      return res.send(text);
+      return res.send(result.text);
     } catch {
-      return res.json({ error: text.slice(0, 500) });
+      return res.json({ error: result.text.slice(0, 500) });
     }
   } catch (error) {
     return res.status(502).json({
