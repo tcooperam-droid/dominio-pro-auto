@@ -92,7 +92,7 @@ export default async function handler(req, res) {
     const userContent = body.screenImage
       ? [
           { type: "text", text: question },
-          { type: "image_url", image_url: { url: String(body.screenImage).slice(0, 4500000) } },
+          { type: "image_url", image_url: { url: String(body.screenImage).slice(0, 1500000) } },
         ]
       : question;
     const upstream = await fetch(config.endpoint, {
