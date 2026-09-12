@@ -161,7 +161,9 @@ async function callTechnicalAgent(scope: string, message: string, extraContext =
     body: JSON.stringify({
       question: message,
       appContext: `${buildAppContext()}\n\nDIAGNÓSTICO ESTRUTURADO:\n${extraContext}`.slice(0, 50000),
-      screenImage: screenImage && screenImage.length < 4_500_000 ? screenImage : undefined,
+      // A Vercel rejeita bodies grandes com 413; a captura já é comprimida,
+      // mas este teto protege também contra imagens antigas ou customizadas.
+      screenImage: screenImage && screenImage.length < 1_600_000 ? screenImage : undefined,
       messages: history.map((item) => ({ role: item.role, content: item.content })),
     }),
   });
