@@ -89,10 +89,16 @@ export default async function handler(req, res) {
       `Contexto atual do aplicativo:\n${String(body.appContext || "indisponível").slice(0, 12000)}`,
       `Arquivos consultados:\n${repository}`,
     ].join("\n\n");
+    const userContent = body.screenImage
+      ? [
+          { type: "text", text: question },
+          { type: "image_url", image_url: { url: String(body.screenImage).slice(0, 4500000) } },
+        ]
+      : question;
     const upstream = await fetch(config.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.token}` },
-      body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: system }, ...(Array.isArray(body.messages) ? body.messages.slice(-8) : []), { role: "user", content: question }], temperature: 0.15, max_tokens: 2200 }),
+      body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: system }, ...(Array.isArray(body.messages) ? body.messages.slice(-8) : []), { role: "user", content: userContent }], temperature: 0.15, max_tokens: 2200 }),
     });
     const text = await upstream.text();
     res.setHeader("Cache-Control", "no-store");
