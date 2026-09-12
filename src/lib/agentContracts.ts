@@ -136,6 +136,7 @@ export const PersonalAgentToolArgsSchema = z.discriminatedUnion("tool", [
   z.object({ tool: z.literal("propose_scheduler_rule"), rule: z.string(), confirmed: z.boolean().optional() }),
   z.object({ tool: z.literal("route_to_scheduler"), message: z.string() }),
   z.object({ tool: z.literal("route_to_technical_agent"), question: z.string() }),
+  z.object({ tool: z.literal("diagnose_scheduler_agent"), question: z.string().optional() }),
   z.object({ tool: z.literal("search_web"), query: z.string() }),
 ]);
 
@@ -243,6 +244,19 @@ export const PERSONAL_AGENT_TOOL_DEFINITIONS = [
         type: "object",
         properties: { question: { type: "string", description: "A pergunta técnica, no texto original." } },
         required: ["question"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "diagnose_scheduler_agent",
+      description:
+        "Aciona o agente técnico como ferramenta do agente pessoal para analisar diálogos, erros e ações recentes do agente de agendamento, além do código e do estado atual do app. Use quando o usuário pedir investigação ou correção de falhas do agendamento.",
+      parameters: {
+        type: "object",
+        properties: { question: { type: "string", description: "Problema observado ou pergunta de diagnóstico." } },
+        required: [],
       },
     },
   },

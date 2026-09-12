@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { handleMessageV2, clearHistory, addFeedback } from "@/lib/agentV2";
 import { loadRules, removeRule } from "@/lib/agentMemory";
+import { looksLikeSchedulerError, recordSchedulerTrace } from "@/lib/agentObservability";
 import { describeImage, searchAndSummarize, transcribeAudio, speakWithOpenAI, stopSpeaking, fileToDataUrl } from "@/lib/agentMedia";
 
 // ─── Tipos ─────────────────────────────────────────────────
@@ -245,6 +246,15 @@ export default function AgentChat() {
         responseText = response.text;
         navigateTo = response.navigateTo;
         messageId = response.messageId;
+        recordSchedulerTrace({
+          request: trimmed,
+          response: response.text,
+          status: looksLikeSchedulerError(response.text) ? "error" : "success",
+          error: looksLikeSchedulerError(response.text) ? response.text : undefined,
+          phase: "AgentChat",
+          actionExecuted: response.actionExecuted,
+          messageId: response.messageId,
+        });
       }
 
       const agentMsg: ChatMessage = {
@@ -273,6 +283,13 @@ export default function AgentChat() {
       }
     } catch (err) {
       console.error("[AgentChat] erro:", err);
+      recordSchedulerTrace({
+        request: trimmed,
+        response: "",
+        status: "error",
+        error: err instanceof Error ? err.message : String(err),
+        phase: "AgentChat",
+      });
       const errorMsg: ChatMessage = {
         id: `e_${Date.now()}`,
         role: "agent",
