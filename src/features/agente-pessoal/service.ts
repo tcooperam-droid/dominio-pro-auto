@@ -164,9 +164,9 @@ async function callTechnicalAgent(scope: string, message: string, extraContext =
     body: JSON.stringify({
       question: message,
       appContext: `${buildAppContext()}\n\nDIAGNÓSTICO ESTRUTURADO:\n${extraContext}`.slice(0, 10000),
-      // A Vercel rejeita bodies grandes com 413; a captura já é comprimida,
-      // mas este teto protege também contra imagens antigas ou customizadas.
-      screenImage: screenImage && screenImage.length < 360_000 ? screenImage : undefined,
+      // O diagnóstico automático usa evidências textuais. A captura visual fica
+      // disponível para a UI, mas não é anexada a este request para evitar 413
+      // em provedores que contam base64 contra o limite de entrada.
       messages: history,
     }),
   });
