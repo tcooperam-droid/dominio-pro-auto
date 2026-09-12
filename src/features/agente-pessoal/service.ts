@@ -154,17 +154,20 @@ async function callResearch(query: string): Promise<{ text: string; citations?: 
 
 async function callTechnicalAgent(scope: string, message: string, extraContext = "", screenImage?: string | null): Promise<string> {
   const endpoint = "/api/technical-agent";
-  const history = loadConversation(scope).slice(-8);
+  const history = loadConversation(scope).slice(-3).map((item) => ({
+    role: item.role,
+    content: item.content.slice(0, 700),
+  }));
   const response = await fetch(endpoint, {
     method: "POST",
     headers: await createAuthenticatedAgentHeaders(endpoint, config?.apiToken || ""),
     body: JSON.stringify({
       question: message,
-      appContext: `${buildAppContext()}\n\nDIAGNÓSTICO ESTRUTURADO:\n${extraContext}`.slice(0, 50000),
+      appContext: `${buildAppContext()}\n\nDIAGNÓSTICO ESTRUTURADO:\n${extraContext}`.slice(0, 10000),
       // A Vercel rejeita bodies grandes com 413; a captura já é comprimida,
       // mas este teto protege também contra imagens antigas ou customizadas.
-      screenImage: screenImage && screenImage.length < 1_600_000 ? screenImage : undefined,
-      messages: history.map((item) => ({ role: item.role, content: item.content })),
+      screenImage: screenImage && screenImage.length < 360_000 ? screenImage : undefined,
+      messages: history,
     }),
   });
   const payload = await response.json().catch(() => ({}));

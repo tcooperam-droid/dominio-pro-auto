@@ -4,9 +4,9 @@ const REPO_API = "https://api.github.com/repos/tcooperam-droid/dominio-pro-auto"
 const RAW_BASE = "https://raw.githubusercontent.com/tcooperam-droid/dominio-pro-auto/main";
 const DEFAULT_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_MODEL = "openai/gpt-oss-120b";
-const MAX_FILES = 8;
-const MAX_FILE_CHARS = 18000;
-const MAX_CONTEXT_CHARS = 90000;
+const MAX_FILES = 4;
+const MAX_FILE_CHARS = 7000;
+const MAX_CONTEXT_CHARS = 28000;
 
 function readBody(req) {
   if (!req.body) return {};
@@ -86,19 +86,19 @@ export default async function handler(req, res) {
       "Você tem acesso somente leitura ao contexto do aplicativo e a um recorte dos arquivos do repositório. Não diga que alterou código, banco ou deployment.",
       "Separe fatos observados, hipótese, causa provável, correção recomendada, riscos e testes. Quando faltar evidência, peça o log ou arquivo específico.",
       "Não revele tokens, chaves, sessões ou dados pessoais desnecessários. Nunca recomende remover autenticação, RLS ou confirmação transacional.",
-      `Contexto atual do aplicativo:\n${String(body.appContext || "indisponível").slice(0, 12000)}`,
+      `Contexto atual do aplicativo:\n${String(body.appContext || "indisponível").slice(0, 8000)}`,
       `Arquivos consultados:\n${repository}`,
     ].join("\n\n");
     const userContent = body.screenImage
       ? [
           { type: "text", text: question },
-          { type: "image_url", image_url: { url: String(body.screenImage).slice(0, 1500000) } },
+          { type: "image_url", image_url: { url: String(body.screenImage).slice(0, 350000) } },
         ]
       : question;
     const upstream = await fetch(config.endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.token}` },
-      body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: system }, ...(Array.isArray(body.messages) ? body.messages.slice(-8) : []), { role: "user", content: userContent }], temperature: 0.15, max_tokens: 2200 }),
+      body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: system }, ...(Array.isArray(body.messages) ? body.messages.slice(-3).map((item) => ({ role: item.role, content: String(item.content || "").slice(0, 700) })) : []), { role: "user", content: userContent }], temperature: 0.15, max_tokens: 1800 }),
     });
     const text = await upstream.text();
     res.setHeader("Cache-Control", "no-store");
