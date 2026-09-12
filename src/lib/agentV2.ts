@@ -1309,7 +1309,14 @@ Se não tiver TODOS os dados necessários, responda apenas: {}`,
         text = raw.replace(/```[\s\S]*?```/g, "").trim();
       }
     } else {
-      text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
+      if (isScheduleMutationRequest(msgTrimmed)) {
+        const fallback = await handleLocalScheduleFallback(msgTrimmed);
+        text = fallback.text;
+        actionExecuted = Boolean(fallback.actionExecuted);
+        navigateTo = fallback.navigateTo;
+      } else {
+        text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
+      }
     }
   }
 

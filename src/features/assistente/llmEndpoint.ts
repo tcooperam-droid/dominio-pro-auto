@@ -27,8 +27,13 @@ export function createAgentHeaders(endpoint: string, token?: string): Record<str
 export async function createAuthenticatedAgentHeaders(endpoint: string, token?: string): Promise<Record<string, string>> {
   const headers = createAgentHeaders(endpoint, token);
   if (usesServerAgentEndpoint(endpoint)) {
-    const { data } = await supabase.auth.getSession();
-    if (!data.session?.access_token) throw new Error("Sessão autenticada obrigatória.");
+    let { data } = await supabase.auth.getSession();
+    const expiresAt = data.session?.expires_at ?? 0;
+    if (!data.session?.access_token || (expiresAt > 0 && expiresAt * 1000 < Date.now() + 60_000)) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (!refreshed.error && refreshed.data.session) data = refreshed.data;
+    }
+    if (!data.session?.access_token) throw new Error("Sessão autenticada obrigatória. Faça login novamente.");
     headers.Authorization = `Bearer ${data.session.access_token}`;
   }
   return headers;

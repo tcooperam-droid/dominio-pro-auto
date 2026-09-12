@@ -1,5 +1,6 @@
 import { createAuthenticatedAgentHeaders, getAgentEndpoint } from "@/features/assistente/llmEndpoint";
 import { getSession } from "@/lib/access";
+import { supabase } from "@/lib/supabase";
 import { buildAppContext } from "./appContext";
 import { addFeedback, addGoal, addInstruction, appendSummary, completeGoal, loadConversation, loadMemory, rememberFact, saveConversation } from "./memory";
 import { buildConversationContext, buildPersonalSystemPrompt, extractFactCommand, extractGoalCommand, extractTeachingInstruction, isLikelyWebResearchRequest, isSchedulerRequest, isTechnicalRequest } from "./prompt";
@@ -37,6 +38,19 @@ function saveExchange(scope: string, user: PersonalMessage, assistant: PersonalM
   saveConversation(scope, [...loadConversation(scope), user, assistant]);
 }
 
+async function postAuthenticated(endpoint: string, body: Record<string, unknown>, apiToken?: string): Promise<Response> {
+  const firstHeaders = await createAuthenticatedAgentHeaders(endpoint, apiToken);
+  let response = await fetch(endpoint, { method: "POST", headers: firstHeaders, body: JSON.stringify(body) });
+  if (response.status === 401) {
+    const refreshed = await supabase.auth.refreshSession();
+    if (!refreshed.error && refreshed.data.session) {
+      const headers = await createAuthenticatedAgentHeaders(endpoint, apiToken);
+      response = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body) });
+    }
+  }
+  return response;
+}
+
 export function initPersonalAgent(nextConfig: PersonalAgentConfig): void {
   config = { ...nextConfig, model: nextConfig.model || PERSONAL_AGENT_MODEL };
 }
@@ -62,10 +76,7 @@ async function callPersonalLLM(scope: string, message: string): Promise<{ text: 
   const requestEndpoint = research
     ? (import.meta.env.PROD ? "/api/research" : "/api/research")
     : endpoint;
-  const response = await fetch(requestEndpoint, {
-    method: "POST",
-    headers: await createAuthenticatedAgentHeaders(requestEndpoint, config.apiToken),
-    body: JSON.stringify({
+  const response = await postAuthenticated(requestEndpoint, {
       model: config.model || PERSONAL_AGENT_MODEL,
       messages: [
         { role: "system", content: system },
@@ -74,8 +85,7 @@ async function callPersonalLLM(scope: string, message: string): Promise<{ text: 
       ],
       temperature: 0.35,
       max_tokens: 1400,
-    }),
-  });
+    }, config.apiToken);
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -91,15 +101,11 @@ async function callPersonalLLM(scope: string, message: string): Promise<{ text: 
 async function callTechnicalAgent(scope: string, message: string): Promise<string> {
   const endpoint = "/api/technical-agent";
   const history = loadConversation(scope).slice(-8);
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: await createAuthenticatedAgentHeaders(endpoint, config?.apiToken || ""),
-    body: JSON.stringify({
+  const response = await postAuthenticated(endpoint, {
       question: message,
       appContext: buildAppContext(),
       messages: history.map((item) => ({ role: item.role, content: item.content })),
-    }),
-  });
+    }, config?.apiToken || "");
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = typeof payload?.error === "string" ? payload.error : `HTTP ${response.status}`;
