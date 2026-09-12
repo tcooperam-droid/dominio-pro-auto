@@ -95,11 +95,22 @@ export default async function handler(req, res) {
           { type: "image_url", image_url: { url: String(body.screenImage).slice(0, 350000) } },
         ]
       : question;
-    const upstream = await fetch(config.endpoint, {
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${config.token}` };
+    const recentMessages = Array.isArray(body.messages)
+      ? body.messages.slice(-3).map((item) => ({ role: item.role, content: String(item.content || "").slice(0, 700) }))
+      : [];
+    const request = (messages) => fetch(config.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.token}` },
-      body: JSON.stringify({ model: config.model, messages: [{ role: "system", content: system }, ...(Array.isArray(body.messages) ? body.messages.slice(-3).map((item) => ({ role: item.role, content: String(item.content || "").slice(0, 700) })) : []), { role: "user", content: userContent }], temperature: 0.15, max_tokens: 1800 }),
+      headers,
+      body: JSON.stringify({ model: config.model, messages, temperature: 0.15, max_tokens: 1800 }),
     });
+    let upstream = await request([{ role: "system", content: system }, ...recentMessages, { role: "user", content: userContent }]);
+    // Alguns provedores devolvem 413 por limite de tokens, mesmo quando o body
+    // HTTP é pequeno. Repetimos uma vez sem imagem, histórico ou repositório.
+    if (upstream.status === 413) {
+      const minimalSystem = "Você é o agente técnico do Domínio Pro. Analise o problema abaixo com os fatos fornecidos. Separe fato, hipótese, causa provável, correção segura e testes. Não diga que alterou o sistema.";
+      upstream = await request([{ role: "system", content: minimalSystem }, { role: "user", content: `${question}\n\nEvidências resumidas:\n${String(body.appContext || "").slice(-4000)}` }]);
+    }
     const text = await upstream.text();
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/json");
