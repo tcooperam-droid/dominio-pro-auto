@@ -35,6 +35,18 @@ async function callProvider(provider, payload) {
   return { upstream, text: await upstream.text() };
 }
 
+function compactPayload(payload) {
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  return {
+    ...payload,
+    messages: messages.slice(-5).map((message) => ({
+      role: message.role,
+      content: String(message.content || "").slice(-5000),
+    })),
+    max_tokens: Math.min(Number(payload.max_tokens) || 1200, 1800),
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -73,8 +85,15 @@ export default async function handler(req, res) {
 
     // O agente de agenda usa um provedor separado, mas pode continuar operando
     // com o provedor pessoal quando o primeiro estiver temporariamente indisponível.
-    if ((result.upstream.status === 502 || result.upstream.status === 503) && process.env.PERSONAL_LLM_API_KEY) {
+    if ((result.upstream.status === 413 || result.upstream.status === 502 || result.upstream.status === 503) && process.env.PERSONAL_LLM_API_KEY) {
       result = await callProvider(providerConfig("PERSONAL_"), payload);
+      usedFallback = true;
+    }
+
+    // Alguns provedores rejeitam contextos grandes com HTTP 413. Tente uma
+    // segunda vez com apenas as mensagens recentes, preservando o pedido atual.
+    if (result.upstream.status === 413) {
+      result = await callProvider(providerConfig(usedFallback ? "PERSONAL_" : ""), compactPayload(payload));
       usedFallback = true;
     }
 
@@ -86,6 +105,13 @@ export default async function handler(req, res) {
       return res.status(502).json({
         error: "O provedor de IA configurado foi descontinuado (HTTP 410). Atualize as variáveis do agente e publique novamente.",
         code: "provider_retired",
+      });
+    }
+
+    if (result.upstream.status === 413) {
+      return res.status(413).json({
+        error: "O contexto da conversa ficou grande demais para o provedor. O histórico foi reduzido; tente o agendamento novamente.",
+        code: "context_too_large",
       });
     }
 

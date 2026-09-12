@@ -82,7 +82,8 @@ const PENDING_KEY = "agentv2_pending";
 function loadHistory(): AgentMessage[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.slice(-12) : [];
   } catch {
     return [];
   }
@@ -630,10 +631,15 @@ async function callLLM(
   data: string,
   config: AgentV2Config,
 ): Promise<string> {
+  const compactHistory = history.slice(-6).map((message) => ({
+    role: message.role,
+    content: String(message.content || "").slice(-1800),
+  }));
+  const compactData = String(data || "(dados indisponíveis)").slice(0, 30000);
   const messages = [
     { role: "system", content: system },
-    { role: "system", content: `=== DADOS DO SISTEMA ===\n${data}\n=== FIM DOS DADOS ===` },
-    ...history,
+    { role: "system", content: `=== DADOS DO SISTEMA ===\n${compactData}\n=== FIM DOS DADOS ===` },
+    ...compactHistory,
     { role: "user", content: userMsg },
   ];
 
@@ -1211,7 +1217,7 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   } catch (err) {
     console.warn("[agentV2] callLLM falhou:", err);
     const errorMessage = err instanceof Error ? err.message : "";
-    if (/\b410\b|temporariamente indisponível|retirement brownout/i.test(errorMessage)) {
+    if (/\b410\b|\b413\b|contexto da conversa ficou grande|temporariamente indisponível|retirement brownout/i.test(errorMessage)) {
       const fallback = await handleLocalScheduleFallback(msgTrimmed);
       addToHistory("assistant", fallback.text);
       return fallback;
@@ -1262,7 +1268,7 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
       console.log("[agentV2] LLM não gerou action, tentando extração forçada...");
       try {
         // Montar contexto completo da conversa para o extrator
-        const recentMsgs = history.slice(-6).map(m => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`).join("\n");
+        const recentMsgs = history.slice(-4).map(m => `${m.role === "user" ? "Usuário" : "Assistente"}: ${String(m.content).slice(-1200)}`).join("\n");
         const forceRaw = await callLLM(
           `Você é um extrator de JSON para agendamentos de salão de beleza.
 Analise o histórico da conversa e extraia os dados do agendamento solicitado.
@@ -1271,7 +1277,7 @@ Formato obrigatório: {"type":"agendar","params":{"clientName":"NOME EXATO","ser
 Use serviceId e employeeId dos dados do sistema fornecidos.
 Se não tiver TODOS os dados necessários, responda apenas: {}`,
           [],
-          `=== HISTÓRICO RECENTE ===\n${recentMsgs}\n\n=== MENSAGEM ATUAL ===\n${msgTrimmed}\n\n=== DADOS DO SISTEMA ===\n${systemData}`,
+          `=== HISTÓRICO RECENTE ===\n${recentMsgs}\n\n=== MENSAGEM ATUAL ===\n${msgTrimmed.slice(0, 2000)}\n\n=== DADOS DO SISTEMA ===\n${systemData.slice(0, 18000)}`,
           "",
           cfg,
         );
