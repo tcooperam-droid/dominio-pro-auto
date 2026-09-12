@@ -21,6 +21,7 @@ import { appointmentsStore, type Appointment, type AppointmentService } from "..
 import { cashSessionsStore } from "../features/financeiro";
 import { getVisibleScreenContext } from "../features/agente-pessoal/appContext";
 import { createAuthenticatedAgentHeaders, getAgentEndpoint, usesServerAgentEndpoint } from "../features/assistente/llmEndpoint";
+import { parseActionPayload, type ActionPayload } from "./agentContracts";
 import {
   calcPeriodStats,
   calcRevenueByEmployee,
@@ -82,8 +83,7 @@ const PENDING_KEY = "agentv2_pending";
 function loadHistory(): AgentMessage[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.slice(-12) : [];
+    return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
@@ -114,10 +114,9 @@ interface PendingAction {
   timestamp: number;
 }
 
-interface ActionPayload {
-  type: "agendar" | "cancelar" | "mover" | "concluir" | "criar_cliente" | "trocar_cliente";
-  params: Record<string, unknown>;
-}
+// ActionPayload agora vem de agentContracts.ts (schema zod validado em
+// runtime), compartilhado com o agente pessoal. Ver parseActionPayload()
+// nos dois pontos de extração abaixo.
 
 function savePendingAction(action: ActionPayload, type: "conflict" | "professional" | "confirmation" | "override"): void {
   try {
@@ -631,15 +630,10 @@ async function callLLM(
   data: string,
   config: AgentV2Config,
 ): Promise<string> {
-  const compactHistory = history.slice(-6).map((message) => ({
-    role: message.role,
-    content: String(message.content || "").slice(-1800),
-  }));
-  const compactData = String(data || "(dados indisponíveis)").slice(0, 30000);
   const messages = [
     { role: "system", content: system },
-    { role: "system", content: `=== DADOS DO SISTEMA ===\n${compactData}\n=== FIM DOS DADOS ===` },
-    ...compactHistory,
+    { role: "system", content: `=== DADOS DO SISTEMA ===\n${data}\n=== FIM DOS DADOS ===` },
+    ...history,
     { role: "user", content: userMsg },
   ];
 
@@ -702,7 +696,7 @@ async function executeCreateClient(params: Record<string, unknown>, allowPending
 
   if (!allowPendingConfirmation) {
     savePendingAction(
-      { type: "criar_cliente", params: { ...params, confirmed: true } },
+      { type: "criar_cliente", params: { ...params, confirmed: true } } as ActionPayload,
       "confirmation",
     );
     return `CONFIRMACAO:Não encontrei o cliente "${name}". Deseja criar esse cadastro${params.phone ? ` com telefone ${String(params.phone)}` : ""}? Responda sim ou não.`;
@@ -827,7 +821,7 @@ async function executeMove(params: Record<string, unknown>): Promise<string> {
     const cHora = localTimeKey(conflict.startTime);
     const cFim = localTimeKey(conflict.endTime);
     savePendingAction(
-      { type: "mover", params: { ...params, forceConflict: true } },
+      { type: "mover", params: { ...params, forceConflict: true } } as ActionPayload,
       "conflict",
     );
     return `CONFLITO:${emp?.name ?? "Profissional"} já tem agendamento das ${cHora} às ${cFim} (${conflict.clientName ?? "cliente"}). Para forçar, confirme explicitamente.`;
@@ -941,7 +935,7 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
   if (!emp) {
     // Fix 3: salvar clientName EXATO do banco para re-execução correta
     savePendingAction(
-      { type: "agendar", params: { ...params, clientName: client.name } },
+      { type: "agendar", params: { ...params, clientName: client.name } } as ActionPayload,
       "professional",
     );
     const lista = emps.map((e) => `${e.name} (ID:${e.id})`).join(", ");
@@ -954,7 +948,7 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
     const whCheck = isWithinWorkingHours(emp, resolvedDate, resolvedTime);
     if (!whCheck.ok) {
       savePendingAction(
-        { type: "agendar", params: { ...params, clientName: client.name, confirmed: true, forceSchedule: true } },
+        { type: "agendar", params: { ...params, clientName: client.name, confirmed: true, forceSchedule: true } } as ActionPayload,
         "override",
       );
       return `FORA_HORARIO:${whCheck.message} Para continuar, responda exatamente "agenda mesmo assim".`;
@@ -979,7 +973,7 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
     const conflictEnd = localTimeKey(conflict.endTime);
     // Fix 3: salvar clientName EXATO do banco para re-execução correta
     savePendingAction(
-      { type: "agendar", params: { ...params, clientName: client.name, forceConflict: true, confirmed: true } },
+      { type: "agendar", params: { ...params, clientName: client.name, forceConflict: true, confirmed: true } } as ActionPayload,
       "conflict",
     );
     return `CONFLITO:${emp.name} já tem agendamento das ${conflictHour} às ${conflictEnd} (${conflict.clientName ?? "cliente"}). Para forçar mesmo assim, confirme explicitamente.`;
@@ -988,7 +982,7 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
   // 7. Confirmar antes de criar o registro
   if (!(allowPendingConfirmation && params.confirmed === true)) {
     savePendingAction(
-      { type: "agendar", params: { ...params, clientName: client.name, confirmed: true } },
+      { type: "agendar", params: { ...params, clientName: client.name, confirmed: true } } as ActionPayload,
       "confirmation",
     );
     return [
@@ -1114,7 +1108,7 @@ async function handleLocalScheduleFallback(userMessage: string): Promise<AgentV2
       date: hints.date,
       time: hints.time,
     },
-  });
+  } as ActionPayload);
   const text = formatLocalActionResult(result);
   const actionExecuted = result.includes("criado com sucesso");
   return {
@@ -1217,7 +1211,7 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   } catch (err) {
     console.warn("[agentV2] callLLM falhou:", err);
     const errorMessage = err instanceof Error ? err.message : "";
-    if (/\b410\b|\b413\b|contexto da conversa ficou grande|temporariamente indisponível|retirement brownout/i.test(errorMessage)) {
+    if (/\b410\b|temporariamente indisponível|retirement brownout/i.test(errorMessage)) {
       const fallback = await handleLocalScheduleFallback(msgTrimmed);
       addToHistory("assistant", fallback.text);
       return fallback;
@@ -1234,7 +1228,9 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
   const match = raw.match(/```action\s*([\s\S]*?)```/);
   if (match) {
     try {
-      const act: ActionPayload = JSON.parse(match[1]);
+      const parsedAction = parseActionPayload(JSON.parse(match[1]));
+      if (!parsedAction.ok) throw new Error(parsedAction.message);
+      const act: ActionPayload = parsedAction.action;
       const result = await executeAction(act);
 
       if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
@@ -1268,7 +1264,7 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
       console.log("[agentV2] LLM não gerou action, tentando extração forçada...");
       try {
         // Montar contexto completo da conversa para o extrator
-        const recentMsgs = history.slice(-4).map(m => `${m.role === "user" ? "Usuário" : "Assistente"}: ${String(m.content).slice(-1200)}`).join("\n");
+        const recentMsgs = history.slice(-6).map(m => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`).join("\n");
         const forceRaw = await callLLM(
           `Você é um extrator de JSON para agendamentos de salão de beleza.
 Analise o histórico da conversa e extraia os dados do agendamento solicitado.
@@ -1277,14 +1273,15 @@ Formato obrigatório: {"type":"agendar","params":{"clientName":"NOME EXATO","ser
 Use serviceId e employeeId dos dados do sistema fornecidos.
 Se não tiver TODOS os dados necessários, responda apenas: {}`,
           [],
-          `=== HISTÓRICO RECENTE ===\n${recentMsgs}\n\n=== MENSAGEM ATUAL ===\n${msgTrimmed.slice(0, 2000)}\n\n=== DADOS DO SISTEMA ===\n${systemData.slice(0, 18000)}`,
+          `=== HISTÓRICO RECENTE ===\n${recentMsgs}\n\n=== MENSAGEM ATUAL ===\n${msgTrimmed}\n\n=== DADOS DO SISTEMA ===\n${systemData}`,
           "",
           cfg,
         );
         const cleaned = forceRaw.replace(/```[\s\S]*?```/g, "").trim();
         if (cleaned && cleaned !== "{}") {
-          const act: ActionPayload = JSON.parse(cleaned);
-          if (act.type && act.params) {
+          const forceParsed = parseActionPayload(JSON.parse(cleaned));
+          if (forceParsed.ok) {
+            const act: ActionPayload = forceParsed.action;
             const result = await executeAction(act);
             if (result.startsWith("AGUARDANDO_PROFISSIONAL:")) {
               text = `Com qual profissional deseja agendar? Disponíveis: ${result.replace("AGUARDANDO_PROFISSIONAL:", "")}`;
@@ -1309,14 +1306,7 @@ Se não tiver TODOS os dados necessários, responda apenas: {}`,
         text = raw.replace(/```[\s\S]*?```/g, "").trim();
       }
     } else {
-      if (isScheduleMutationRequest(msgTrimmed)) {
-        const fallback = await handleLocalScheduleFallback(msgTrimmed);
-        text = fallback.text;
-        actionExecuted = Boolean(fallback.actionExecuted);
-        navigateTo = fallback.navigateTo;
-      } else {
-        text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
-      }
+      text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
     }
   }
 
@@ -1420,10 +1410,10 @@ async function handlePendingAction(
     if (emp) {
       clearPendingAction();
       addToHistory("user", msgTrimmed);
-      const updatedAction: ActionPayload = {
+      const updatedAction = {
         ...pending.action,
         params: { ...pending.action.params, employeeId: emp.id },
-      };
+      } as ActionPayload;
       const result = await executeAction(updatedAction, false);
 
       if (result.startsWith("CONFLITO:")) {

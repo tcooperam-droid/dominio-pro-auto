@@ -78,6 +78,7 @@
     "zod": "^3.25.76"
   },
   "dependencies": {
-    "@capacitor/app": "^8.1.1"
+    "@capacitor/app": "^8.1.1",
+    "html2canvas": "^1.4.1"
   }
 }

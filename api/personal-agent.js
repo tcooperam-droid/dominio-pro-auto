@@ -41,6 +41,8 @@ export default async function handler(req, res) {
         messages: body.messages,
         temperature: typeof body.temperature === "number" ? body.temperature : 0.35,
         max_tokens: Math.min(Math.max(Number(body.max_tokens) || 1400, 1), 4000),
+        ...(Array.isArray(body.tools) ? { tools: body.tools } : {}),
+        ...(body.tool_choice ? { tool_choice: body.tool_choice } : {}),
       }),
     });
     const text = await upstream.text();

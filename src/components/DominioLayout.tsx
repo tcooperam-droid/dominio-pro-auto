@@ -13,7 +13,7 @@ import {
   Calendar, Users, UserCheck, Scissors, DollarSign,
   BarChart2, Settings, Database, Menu, X,
   Sun, Moon, Plus, Wrench,
-  LogOut, Receipt, Percent, TrendingUp, Bot
+  LogOut, Receipt, Percent, TrendingUp, Bot, Bug
 } from "lucide-react";
 
 // ─── Navegação ────────────────────────────────────────────
@@ -26,6 +26,7 @@ const PRIMARY_NAV = [
 
 const SECONDARY_NAV = [
   { path: "/agente-pessoal",         label: "Agente pessoal", icon: Bot         },
+  { path: "/diagnostico-tecnico",   label: "Diagnóstico técnico", icon: Bug    },
   { path: "/despesas",              label: "Despesas",      icon: Receipt     },
   { path: "/comissoes",             label: "Comissões",     icon: Percent     },
   { path: "/contabilidade",         label: "Contabilidade", icon: Receipt     },
