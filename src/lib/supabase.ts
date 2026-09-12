@@ -16,7 +16,15 @@ if (!hasSupabaseConfig && !isPreviewWithoutData) {
 const supabaseUrl = configuredUrl ?? "https://preview-placeholder.supabase.co";
 const supabaseKey = configuredKey ?? "preview-anon-key";
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    // Mantém a sessão no storage do navegador e renova o access token sem
+    // pedir um novo código enquanto o refresh token ainda for válido.
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
 
 // A sessão é criada pelo fluxo de login e validada pelo AuthGate. Não criar
 // sessões anônimas: elas não representam uma identidade confiável para o RLS.
