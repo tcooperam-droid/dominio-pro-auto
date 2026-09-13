@@ -49,6 +49,7 @@ import {
   normalizeTime as normalizeScheduleTime,
   resolveDate as resolveScheduleDate,
 } from "./agentSchedule";
+import { validateSchedulerPlan } from "./schedulerCore";
 
 // ─── Tipos públicos ───────────────────────────────────────
 
@@ -961,22 +962,28 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
   if (!scheduleTimes) return "Não foi possível montar o horário solicitado.";
   const { startTime, endTime } = scheduleTimes;
 
-  // 6. Verificar conflito
-  const conflict = listAppointmentsByLocalDate(resolvedDate).find((a) => {
-    if (a.employeeId !== emp!.id || a.status === "cancelled") return false;
-    return intervalsOverlap(a.startTime, a.endTime, startTime, endTime);
-  });
-
   const conflictOverride = allowPendingConfirmation && params.confirmed === true && params.forceConflict === true;
-  if (conflict && !conflictOverride) {
-    const conflictHour = localTimeKey(conflict.startTime);
-    const conflictEnd = localTimeKey(conflict.endTime);
+  const validation = validateSchedulerPlan({
+    plan: { startTime, endTime, employeeId: emp.id, serviceId: svc.id, durationMinutes },
+    employee: emp,
+    appointments: listAppointmentsByLocalDate(resolvedDate),
+    date: resolvedDate,
+    time: resolvedTime,
+    forceConflict: conflictOverride,
+    forceSchedule: scheduleOverride,
+  });
+  if (!validation.ok && validation.error === "CONFLICT" && validation.conflict && !conflictOverride) {
+    const conflictHour = localTimeKey(validation.conflict.startTime);
+    const conflictEnd = localTimeKey(validation.conflict.endTime);
     // Fix 3: salvar clientName EXATO do banco para re-execução correta
     savePendingAction(
       { type: "agendar", params: { ...params, clientName: client.name, forceConflict: true, confirmed: true } } as ActionPayload,
       "conflict",
     );
-    return `CONFLITO:${emp.name} já tem agendamento das ${conflictHour} às ${conflictEnd} (${conflict.clientName ?? "cliente"}). Para forçar mesmo assim, confirme explicitamente.`;
+    return `CONFLITO:${emp.name} já tem agendamento das ${conflictHour} às ${conflictEnd} (${validation.conflict.clientName ?? "cliente"}). Para forçar mesmo assim, confirme explicitamente.`;
+  }
+  if (!validation.ok && validation.error === "INVALID_INTERVAL") {
+    return validation.message ?? "Intervalo de agendamento inválido.";
   }
 
   // 7. Confirmar antes de criar o registro

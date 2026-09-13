@@ -12,6 +12,7 @@ import {
 import { handleMessageV2, clearHistory, addFeedback } from "@/lib/agentV2";
 import { loadRules, removeRule } from "@/lib/agentMemory";
 import { looksLikeSchedulerError, recordSchedulerTrace } from "@/lib/agentObservability";
+import { finishAgentRun, recordAgentIncident, recordAgentToolCall, startAgentRun } from "@/lib/agentRunStore";
 import { describeImage, searchAndSummarize, transcribeAudio, speakWithOpenAI, stopSpeaking, fileToDataUrl } from "@/lib/agentMedia";
 
 // ─── Tipos ─────────────────────────────────────────────────
@@ -242,6 +243,7 @@ export default function AgentChat() {
         responseText = await searchAndSummarize(trimmed);
       } else {
         // Fluxo normal do agente
+        const schedulerRun = await startAgentRun({ agentName: "scheduler", request: trimmed });
         const response = await handleMessageV2(trimmed);
         responseText = response.text;
         navigateTo = response.navigateTo;
@@ -255,6 +257,10 @@ export default function AgentChat() {
           actionExecuted: response.actionExecuted,
           messageId: response.messageId,
         });
+        const failed = looksLikeSchedulerError(response.text);
+        await recordAgentToolCall({ run: schedulerRun, toolName: "scheduler.handle_message", arguments: { message: trimmed }, result: response, status: failed ? "error" : "success", errorMessage: failed ? response.text : undefined });
+        await finishAgentRun(schedulerRun, { status: failed ? "error" : "success", output: response, errorCode: failed ? "SCHEDULER_RESPONSE_ERROR" : undefined, errorMessage: failed ? response.text : undefined });
+        if (failed) await recordAgentIncident({ run: schedulerRun, agentName: "scheduler", code: "SCHEDULER_RESPONSE_ERROR", message: response.text, evidence: { request: trimmed, response } });
       }
 
       const agentMsg: ChatMessage = {
