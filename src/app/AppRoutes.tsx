@@ -20,7 +20,6 @@ const ComissoesPage = lazy(() => import("../pages/ComissoesPage"));
 const FinanceiroDashboardPage = lazy(() => import("../pages/FinanceiroDashboardPage"));
 const ContabilidadePage = lazy(() => import("../pages/ContabilidadePage"));
 const PersonalAgentPage = lazy(() => import("../pages/PersonalAgentPage"));
-const TechnicalDiagnosticsPage = lazy(() => import("../pages/TechnicalDiagnosticsPage"));
 const UsuariosPage = lazy(() => import("../pages/UsuariosPage"));
 
 function RouteLoading() {
@@ -73,7 +72,6 @@ function ProtectedContent() {
           <Route path="/usuarios" component={UsuariosPage} />
           <Route path="/ferramentas-clientes" component={FerramentasClientesPage} />
           <Route path="/agente-pessoal" component={PersonalAgentPage} />
-          <Route path="/diagnostico-tecnico" component={TechnicalDiagnosticsPage} />
           <Route path="/assistente">
             <Redirect to="/agente-pessoal" />
           </Route>
