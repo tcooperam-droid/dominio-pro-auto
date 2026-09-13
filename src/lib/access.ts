@@ -41,7 +41,6 @@ export const MENU_VISIBILITY: Record<UserRole, Record<string, boolean>> = {
     comissoes: true,
     financeiro: true,
     "agente-pessoal": true,
-    "diagnostico-tecnico": true,
     usuarios: true,
   },
   manager: {
@@ -60,7 +59,6 @@ export const MENU_VISIBILITY: Record<UserRole, Record<string, boolean>> = {
     comissoes: true,
     financeiro: true,
     "agente-pessoal": true,
-    "diagnostico-tecnico": true,
     usuarios: false,
   },
   employee: {
@@ -79,7 +77,6 @@ export const MENU_VISIBILITY: Record<UserRole, Record<string, boolean>> = {
     comissoes: false,
     financeiro: false,
     "agente-pessoal": false,
-    "diagnostico-tecnico": false,
     usuarios: false,
   },
 };
