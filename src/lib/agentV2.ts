@@ -18,6 +18,7 @@ import { clientsStore } from "../features/clientes";
 import { servicesStore, type Service } from "../features/servicos";
 import { employeesStore, type Employee } from "../features/funcionarios";
 import { appointmentsStore, type Appointment, type AppointmentService } from "../features/agenda";
+import { appointmentRequestKey, confirmAppointmentHold, createOrRefreshAppointmentHold, getActiveAppointmentHold } from "./store/appointmentHolds";
 import { cashSessionsStore } from "../features/financeiro";
 import { getVisibleScreenContext } from "../features/agente-pessoal/appContext";
 import { createAuthenticatedAgentHeaders, getAgentEndpoint, usesServerAgentEndpoint } from "../features/assistente/llmEndpoint";
@@ -985,11 +986,17 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
   if (!validation.ok && validation.error === "INVALID_INTERVAL") {
     return validation.message ?? "Intervalo de agendamento inválido.";
   }
+  const requestKey = appointmentRequestKey({ clientId: client.id, employeeId: emp.id, serviceId: svc.id, startTime, endTime });
+  try {
+    await createOrRefreshAppointmentHold({ requestKey, clientId: client.id, clientName: client.name, employeeId: emp.id, serviceId: svc.id, startTime, endTime });
+  } catch (error) {
+    return `Não foi possível reservar temporariamente este horário: ${error instanceof Error ? error.message : "tente novamente"}`;
+  }
 
   // 7. Confirmar antes de criar o registro
   if (!(allowPendingConfirmation && params.confirmed === true)) {
     savePendingAction(
-      { type: "agendar", params: { ...params, clientName: client.name, confirmed: true } } as ActionPayload,
+      { type: "agendar", params: { ...params, clientName: client.name, confirmed: true, requestKey } } as unknown as ActionPayload,
       "confirmation",
     );
     return [
@@ -1001,6 +1008,19 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
       `Profissional: ${emp.name}`,
       "Confirma? Responda sim ou não.",
     ].join("\n");
+  }
+
+  const hold = await getActiveAppointmentHold(String(params.requestKey || requestKey));
+  if (!hold || hold.clientId !== client.id || hold.employeeId !== emp.id || hold.serviceId !== svc.id || hold.startTime !== startTime || hold.endTime !== endTime) {
+    return "A confirmação expirou ou não corresponde mais à proposta. Vou recalcular o horário; confirme novamente.";
+  }
+  const existing = appointmentsStore.list({}).find((item) =>
+    item.status !== "cancelled" && item.clientId === client.id && item.employeeId === emp.id &&
+    item.startTime === startTime && item.endTime === endTime && item.services.some((service) => service.serviceId === svc.id),
+  );
+  if (existing) {
+    await confirmAppointmentHold(hold.requestKey, existing.id);
+    return `Agendamento já confirmado anteriormente.\nID: ${existing.id}\nCliente: ${existing.clientName}\nData: ${resolvedDate} às ${resolvedTime}\nProfissional: ${emp.name}`;
   }
 
   // 8. Criar agendamento
@@ -1031,6 +1051,7 @@ async function executeSchedule(params: Record<string, unknown>, allowPendingConf
   if (!created || !created.id) {
     return "Erro ao criar agendamento no banco. Verifique os dados e tente novamente.";
   }
+  await confirmAppointmentHold(hold.requestKey, created.id);
 
   window.dispatchEvent(new Event("store_updated"));
   refreshPreferences();
