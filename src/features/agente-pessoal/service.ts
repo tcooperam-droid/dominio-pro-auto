@@ -8,6 +8,7 @@ import { addRule } from "@/lib/agentMemory";
 import { collectDiagnosticSnapshot, findLocalDivergences, formatDiagnosticContext, refreshDiagnosticSnapshot, runScheduleScenario } from "@/lib/agentDiagnostics";
 import { captureVisibleScreen } from "@/lib/screenCapture";
 import { formatSchedulerTrace } from "@/lib/agentObservability";
+import { formatSupervisorEvidence, loadSupervisorEvidence } from "@/lib/agentSupervisor";
 import { PERSONAL_AGENT_TOOL_DEFINITIONS, PersonalAgentToolArgsSchema, type PersonalAgentToolArgs } from "@/lib/agentContracts";
 import {
   PERSONAL_AGENT_MODEL,
@@ -280,8 +281,9 @@ async function executeToolCall(scope: string, name: string, argsJson: string): P
 
     case "diagnose_scheduler_agent": {
       const trace = formatSchedulerTrace();
+      const evidence = await loadSupervisorEvidence().catch(() => ({ runs: [], toolCalls: [], incidents: [] }));
       const question = args.question || "Analise os diálogos e erros recentes do agente de agendamento e identifique a causa provável, os arquivos envolvidos, os testes necessários e uma correção segura.";
-      const text = await callTechnicalAgent(scope, question, `DIÁLOGOS E ERROS RECENTES DO AGENTE DE AGENDAMENTO:\n${trace}`);
+      const text = await callTechnicalAgent(scope, question, `DIÁLOGOS E ERROS RECENTES DO AGENTE DE AGENDAMENTO:\n${trace}\n\nEVIDÊNCIA SERVER-SIDE (Supabase):\n${formatSupervisorEvidence(evidence)}`);
       return { text, routedTo: "personal" };
     }
 
