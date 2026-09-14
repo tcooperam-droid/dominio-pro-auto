@@ -889,6 +889,10 @@ async function handleLocalScheduleFallback(userMessage: string): Promise<AgentV2
     servicesStore.list(true).map((service) => ({ id: service.id, name: service.name })),
     employeesStore.list(true).map((employee) => ({ id: employee.id, name: employee.name })),
   );
+  if (!hints.employeeName && /\bcomigo\b/i.test(userMessage)) {
+    const activeEmployees = employeesStore.list(true);
+    if (activeEmployees.length === 1) hints.employeeName = activeEmployees[0].name;
+  }
 
   const missing: string[] = [];
   if (!hints.clientName) missing.push("o nome exato do cliente");
@@ -1069,9 +1073,34 @@ export async function handleMessageV2(userMessage: string): Promise<AgentV2Respo
       console.error("[AgentV2] Erro ao processar ação:", err);
     }
   } else if (isLikelyActionRequest(msgTrimmed)) {
-    if (claimsActionSuccess(raw)) {
-      // LLM afirmou ter feito mas não gerou o bloco action — forçar extração via segunda chamada
-      console.log("[agentV2] LLM não gerou action, tentando extração forçada...");
+    // O LLM não é a autoridade para decidir se uma mutação foi executada.
+    // Se ele não emitir um bloco action (inclusive quando disser que não tem
+    // ferramenta), usamos o extrator local e chamamos o executor transacional.
+    // Isso impede respostas simuladas e garante que a Agenda seja atualizada
+    // pelo Supabase quando os dados da mensagem forem suficientes.
+    try {
+      const localFallback = await handleLocalScheduleFallback(msgTrimmed);
+      text = localFallback.text;
+      actionExecuted = Boolean(localFallback.actionExecuted);
+      navigateTo = localFallback.navigateTo;
+      if (actionExecuted) {
+        addToHistory("assistant", text);
+        return { text, actionExecuted, navigateTo, messageId: `m_${Date.now()}`, userMessage: msgTrimmed };
+      }
+      if (localFallback.text && !claimsActionSuccess(raw)) {
+        // Mensagens de confirmação, conflito ou dados faltantes do executor
+        // têm precedência sobre a resposta textual do LLM.
+        text = localFallback.text;
+      }
+    } catch (fallbackError) {
+      console.warn("[agentV2] fallback local de agenda falhou:", fallbackError);
+      if (claimsActionSuccess(raw)) {
+        // Manter a resposta do LLM somente como último recurso visual; o
+        // registro de erro continua sendo feito pela ponte de observabilidade.
+        text = raw.replace(/```[\s\S]*?```/g, "").trim();
+      }
+    }
+    if (!text) {
       try {
         // Montar contexto completo da conversa para o extrator
         const recentMsgs = history.slice(-6).map(m => `${m.role === "user" ? "Usuário" : "Assistente"}: ${m.content}`).join("\n");
@@ -1115,8 +1144,6 @@ Se não tiver TODOS os dados necessários, responda apenas: {}`,
       } catch {
         text = raw.replace(/```[\s\S]*?```/g, "").trim();
       }
-    } else {
-      text = raw.replace(/```[\s\S]*?```/g, "").trim() || "Não consegui gerar a ação. Pode repetir o pedido?";
     }
   }
 

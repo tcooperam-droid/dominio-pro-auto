@@ -75,4 +75,17 @@ describe("agentSchedule", () => {
       time: "14h",
     });
   });
+
+  it("extrai um pedido direto mesmo quando o texto menciona 'comigo'", () => {
+    const hints = extractLocalScheduleHints(
+      "Agende um corte masculino às 17:00 amanhã para João comigo",
+      [{ id: 725, name: "João" }, { id: 726, name: "João sogro do Stefan" }],
+      [{ id: 10, name: "Corte masculino" }],
+      [{ id: 20, name: "Ricardo Braga" }],
+    );
+    expect(hints.clientName).toBe("João");
+    expect(hints.serviceName).toBe("Corte masculino");
+    expect(hints.date).toBe("amanha");
+    expect(hints.time).toBe("17:00");
+  });
 });
