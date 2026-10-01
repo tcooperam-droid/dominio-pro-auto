@@ -243,6 +243,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
   const pointerStart   = useRef<{ y: number; x: number } | null>(null);
   const dragReady      = useRef(false); // long press concluído
   const didDrag        = useRef(false); // drag efetivamente iniciado
+  const openedOnPointerUp = useRef(false); // evita o clique sintético duplicado no touch
   const [pressing, setPressing] = useState(false); // feedback visual
 
   const cancelLongPress = useCallback(() => {
@@ -296,11 +297,19 @@ const AppointmentBlock = memo(function AppointmentBlock({
     }
   }, [appt, onDragStart, cancelLongPress]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    const shouldOpen = !didDrag.current;
     cancelLongPress();
     // Não zera didDrag.current aqui — o onClick do React dispara DEPOIS do pointerup
     // e precisa checar se houve drag. Zeramos no próximo pointerdown.
-  }, [cancelLongPress]);
+    // Em telas touch, alguns navegadores não disparam o clique sintético depois
+    // de setPointerCapture. Abrimos no pointerup e suprimimos apenas esse clique
+    // sintético, mantendo o comportamento de arrastar intacto.
+    if (shouldOpen && e.pointerType !== "mouse") {
+      openedOnPointerUp.current = true;
+      onClick();
+    }
+  }, [cancelLongPress, onClick]);
 
   return (
     <div
@@ -308,7 +317,14 @@ const AppointmentBlock = memo(function AppointmentBlock({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={cancelLongPress}
-      onClick={(e) => { e.stopPropagation(); if (!didDrag.current) onClick(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (openedOnPointerUp.current) {
+          openedOnPointerUp.current = false;
+          return;
+        }
+        if (!didDrag.current) onClick();
+      }}
       style={{
         position: "absolute",
         top: `${top}px`,
