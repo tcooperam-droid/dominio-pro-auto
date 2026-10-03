@@ -225,6 +225,33 @@ export const expensesStore = {
     return cache.expenses;
   },
 
+  async replicateFromPreviousMonth(sourceMonth: string, targetMonth: string): Promise<number> {
+    const sourceExpenses = (await this.fetchAll()).filter(expense => expense.date.startsWith(sourceMonth));
+    if (sourceExpenses.length === 0) return 0;
+
+    const [targetYear, targetMonthNumber] = targetMonth.split("-").map(Number);
+    const targetLastDay = new Date(Date.UTC(targetYear, targetMonthNumber, 0)).getUTCDate();
+    const rows = sourceExpenses.map(expense => {
+      const day = Math.min(Number(expense.date.slice(-2)), targetLastDay);
+      return {
+        date: `${targetMonth}-${String(day).padStart(2, "0")}`,
+        category: expense.category,
+        description: expense.description,
+        amount: expense.amount,
+        status: expense.status,
+        notes: expense.notes,
+      };
+    });
+
+    const { data, error } = await supabase.from("expenses").insert(rows).select();
+    if (error) throw error;
+
+    const created = (data ?? []).map(toExpense);
+    cache.expenses = [...created, ...cache.expenses];
+    window.dispatchEvent(new Event("expenses_updated"));
+    return created.length;
+  },
+
   async create(data: Omit<Expense, "id" | "createdAt">): Promise<Expense> {
     const { data: row, error } = await supabase
       .from("expenses")

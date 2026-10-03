@@ -4,7 +4,7 @@ import { format, parseISO, isBefore, startOfDay } from "date-fns";
 import { getExpenseMonthRange, shiftExpenseMonth } from "@/lib/expensePeriods";
 import { ptBR } from "date-fns/locale";
 import { 
-  Receipt, Plus, Search, Filter, Trash2, Edit2, 
+  Receipt, Plus, Search, Filter, Trash2, Edit2, Copy,
   AlertCircle, CheckCircle2, Clock, ArrowLeft,
   ChevronDown, ChevronLeft, ChevronRight, X
 } from "lucide-react";
@@ -51,6 +51,7 @@ export default function DespesasPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
   const monthInitializedRef = useRef(false);
+  const [replicating, setReplicating] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState<ExpenseFormData>({
@@ -194,6 +195,32 @@ export default function DespesasPage() {
     setIsModalOpen(true);
   }
 
+  async function handleReplicatePreviousMonth() {
+    const previousMonth = shiftExpenseMonth(monthAnchor, -1);
+    const previousRange = getExpenseMonthRange(previousMonth);
+    const previousMonthKey = format(previousRange.start, "yyyy-MM");
+    const targetMonthKey = format(monthStart, "yyyy-MM");
+    const previousLabel = format(previousRange.start, "MMMM 'de' yyyy", { locale: ptBR });
+    const localCount = expenses.filter(expense => expense.date.startsWith(previousMonthKey)).length;
+
+    if (localCount === 0) {
+      toast.info(`Nenhuma despesa encontrada em ${previousLabel}`);
+      return;
+    }
+
+    try {
+      setReplicating(true);
+      const count = await expensesStore.replicateFromPreviousMonth(previousMonthKey, targetMonthKey);
+      await loadExpenses();
+      toast.success(`${count} despesa(s) replicada(s) de ${previousLabel}`);
+    } catch (error) {
+      console.error("[Despesas] Erro ao replicar despesas:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao replicar despesas");
+    } finally {
+      setReplicating(false);
+    }
+  }
+
   const accentColor = localStorage.getItem("salon_config") ? JSON.parse(localStorage.getItem("salon_config")!).accentColor : "#ec4899";
 
   return (
@@ -263,6 +290,16 @@ export default function DespesasPage() {
           </button>
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={handleReplicatePreviousMonth}
+        disabled={replicating}
+        className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 hover:text-white transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-wait"
+      >
+        <Copy className="w-4 h-4" />
+        {replicating ? "Replicando..." : "Replicar despesas do mês anterior"}
+      </button>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
