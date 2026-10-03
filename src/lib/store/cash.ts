@@ -238,7 +238,7 @@ export const expensesStore = {
         category: expense.category,
         description: expense.description,
         amount: expense.amount,
-        status: expense.status,
+        status: "pendente",
         notes: expense.notes,
       };
     });
