@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { expensesStore, type Expense } from "@/features/financeiro";
 import { format, parseISO, isBefore, startOfDay } from "date-fns";
 import { getExpenseMonthRange, shiftExpenseMonth } from "@/lib/expensePeriods";
@@ -50,6 +50,7 @@ export default function DespesasPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [monthAnchor, setMonthAnchor] = useState(() => new Date());
+  const monthInitializedRef = useRef(false);
 
   // Form State
   const [formData, setFormData] = useState<ExpenseFormData>({
@@ -70,8 +71,23 @@ export default function DespesasPage() {
       setLoading(true);
       const data = await expensesStore.fetchAll();
       setExpenses(data);
+      // Se o mês atual estiver vazio, abrir o último mês com lançamentos.
+      // Assim os registros existentes no Supabase não ficam ocultos pelo filtro
+      // mensal quando o calendário avança para um novo mês.
+      if (!monthInitializedRef.current) {
+        monthInitializedRef.current = true;
+        const currentMonth = format(new Date(), "yyyy-MM");
+        const latestExpense = [...data]
+          .filter(expense => /^\d{4}-\d{2}-\d{2}$/.test(expense.date))
+          .sort((a, b) => b.date.localeCompare(a.date))[0];
+        const hasCurrentMonthExpenses = data.some(expense => expense.date.startsWith(currentMonth));
+        if (latestExpense && !hasCurrentMonthExpenses) {
+          setMonthAnchor(parseISO(latestExpense.date));
+        }
+      }
     } catch (error) {
-      toast.error("Erro ao carregar despesas");
+      console.error("[Despesas] Erro ao carregar despesas:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao carregar despesas");
     } finally {
       setLoading(false);
     }
@@ -124,6 +140,10 @@ export default function DespesasPage() {
         ...formData,
         amount: parseFloat(formData.amount.replace(",", ".")),
       };
+      if (!Number.isFinite(payload.amount) || payload.amount < 0) {
+        toast.error("Informe um valor válido para a despesa");
+        return;
+      }
 
       if (editingExpense) {
         await expensesStore.update(editingExpense.id, payload);
@@ -145,7 +165,8 @@ export default function DespesasPage() {
       });
       loadExpenses();
     } catch (error) {
-      toast.error("Erro ao salvar despesa");
+      console.error("[Despesas] Erro ao salvar despesa:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar despesa");
     }
   }
 
