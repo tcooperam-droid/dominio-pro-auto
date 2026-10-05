@@ -103,6 +103,7 @@ export default function AppointmentModal({
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
   const [loading, setLoading]                   = useState(false);
   const dateInputRef = useRef<HTMLInputElement>(null);
+  const timeInputRef = useRef<HTMLInputElement>(null);
   const formInitializedRef = useRef<string | null>(null);
   const formKey = appointment
     ? `edit:${appointment.id}`
@@ -162,6 +163,15 @@ export default function AppointmentModal({
   // campo controlado pelo React e abre o seletor dentro do gesto do usuário.
   const openDatePicker = () => {
     const input = dateInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    try {
+      input?.showPicker?.();
+    } catch {
+      // Navegadores sem showPicker continuam usando o comportamento padrão.
+    }
+  };
+
+  const openTimePicker = () => {
+    const input = timeInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
     try {
       input?.showPicker?.();
     } catch {
@@ -705,7 +715,15 @@ export default function AppointmentModal({
             </div>
             <div className="space-y-1 col-span-2">
               <Label>Horário de início *</Label>
-              <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+              <Input
+                ref={timeInputRef}
+                type="time"
+                value={startTime}
+                onChange={e => setStartTime(e.target.value)}
+                onPointerDown={openTimePicker}
+                onClick={openTimePicker}
+                aria-label="Escolher horário de início do agendamento"
+              />
             </div>
           </div>
 
