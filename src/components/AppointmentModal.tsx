@@ -567,7 +567,7 @@ export default function AppointmentModal({
                               {suggestions.map((item, index) => item.service && (
                                 <div key={item.serviceId} className="flex items-center justify-between gap-2 text-xs">
                                   <div className="min-w-0">
-                                    <p className="truncate text-foreground">{index === 0 ? "1º" : "2º"} · {item.service.name}</p>
+                                    <p className="truncate text-foreground">{index + 1}º · {item.service.name}</p>
                                     <p className="text-[10px] text-muted-foreground">Preço atual · {item.count}x no histórico</p>
                                   </div>
                                   <span className="shrink-0 font-semibold text-primary">R$ {item.service.price.toFixed(2)}</span>
