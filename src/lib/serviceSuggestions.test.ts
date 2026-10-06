@@ -45,6 +45,18 @@ const services: Service[] = [
     active: true,
     createdAt: "2026-01-01T00:00:00.000Z",
   },
+  {
+    id: 4,
+    name: "Terceiro Serviço Atual",
+    description: null,
+    durationMinutes: 30,
+    price: 60,
+    materialCostPercent: 5,
+    commissionMode: "cost_first",
+    color: "#22c55e",
+    active: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  },
 ];
 
 function appointment(id: number, startTime: string, serviceId: number, status: Appointment["status"] = "completed"): Appointment {
@@ -85,7 +97,7 @@ describe("sugestão de serviço por reincidência", () => {
     expect(result.map(item => [item.serviceId, item.count])).toEqual([[2, 2], [1, 2]]);
   });
 
-  it("retorna as duas maiores incidências ativas na ordem correta", () => {
+  it("retorna as três maiores incidências ativas na ordem correta", () => {
     const result = getMostFrequentCurrentServices([
       appointment(1, "2026-08-01T12:00:00.000Z", 1),
       appointment(2, "2026-08-02T12:00:00.000Z", 1),
@@ -96,10 +108,11 @@ describe("sugestão de serviço por reincidência", () => {
       appointment(7, "2026-08-07T12:00:00.000Z", 2),
       appointment(8, "2026-08-08T12:00:00.000Z", 2),
       appointment(9, "2026-08-09T12:00:00.000Z", 2),
+      appointment(10, "2026-08-10T12:00:00.000Z", 4),
     ], services);
 
-    expect(result.map(item => [item.serviceId, item.count])).toEqual([[1, 3], [3, 2]]);
-    expect(result.map(item => item.service?.price)).toEqual([80, 150]);
+    expect(result.map(item => [item.serviceId, item.count])).toEqual([[1, 3], [3, 2], [4, 1]]);
+    expect(result.map(item => item.service?.price)).toEqual([80, 150, 60]);
   });
 
   it("considera scheduled passado, ignora cancelado/no-show e não usa futuro como histórico", () => {

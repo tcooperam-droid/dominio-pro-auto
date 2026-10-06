@@ -64,7 +64,7 @@ export function getClientServiceRecurrence(
 export function getMostFrequentCurrentServices(
   appointments: Appointment[],
   services: Service[],
-  limit = 2,
+  limit = 3,
   now = new Date(),
 ): ServiceRecurrence[] {
   return getClientServiceRecurrence(appointments, services, now)
