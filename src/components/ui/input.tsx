@@ -1,5 +1,6 @@
 import { useDialogComposition } from "@/components/ui/dialog";
 import { useComposition } from "@/hooks/useComposition";
+import { openNativePicker } from "@/lib/nativePicker";
 import { cn } from "@/lib/utils";
 import * as React from "react";
 
@@ -9,6 +10,7 @@ function Input({
   onKeyDown,
   onCompositionStart,
   onCompositionEnd,
+  onPointerDown,
   ...props
 }: React.ComponentProps<"input">) {
   // Get dialog composition context if available (will be no-op if not inside Dialog)
@@ -62,6 +64,10 @@ function Input({
       onCompositionStart={handleCompositionStart}
       onCompositionEnd={handleCompositionEnd}
       onKeyDown={handleKeyDown}
+      onPointerDown={event => {
+        onPointerDown?.(event);
+        openNativePicker(event.currentTarget, event.pointerType);
+      }}
       {...props}
     />
   );

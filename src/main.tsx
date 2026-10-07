@@ -2,10 +2,20 @@ import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
 import { ensureSupabaseSession } from "./lib/supabase";
+import { openNativePicker } from "./lib/nativePicker";
 
 // Monta a interface imediatamente. A autenticação não pode bloquear o primeiro
 // render — no Android isso deixava o ecrã branco quando a rede demorava.
 createRoot(document.getElementById("root")!).render(<App />);
+
+// Alguns módulos usam <input> nativo em vez do componente Input compartilhado.
+// No Android, tocar no campo pode apenas marcar o texto sem abrir o seletor.
+document.addEventListener("pointerdown", event => {
+  const target = event.target;
+  if (target instanceof HTMLInputElement) {
+    openNativePicker(target, event.pointerType);
+  }
+});
 
 // Inicializa a sessão em segundo plano para as operações do Supabase.
 void ensureSupabaseSession().catch((err: unknown) => {
