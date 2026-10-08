@@ -17,7 +17,7 @@ import { employeesStore } from "@/features/funcionarios";
 import { applyAccentColor } from "@/contexts/ThemeContext";
 import { testAgentV2Connection, initAgentV2 } from "@/lib/agentV2";
 
-type BgType = "default" | "solid" | "gradient" | "image";
+type BgType = "default" | "solid" | "gradient" | "image" | "rosa-wallpaper";
 
 interface SalonConfig {
   salonName: string;
@@ -38,6 +38,10 @@ interface SalonConfig {
   bgGradientTo: string;
   bgGradientDir: string;
   bgImageUrl: string;
+  bgFit: "contain" | "cover";
+  bgOverlay: number;
+  appointmentOpacity: number;
+  appointmentTextContrast: number;
 }
 
 const DEFAULT_CONFIG: SalonConfig = {
@@ -59,6 +63,10 @@ const DEFAULT_CONFIG: SalonConfig = {
   bgGradientTo: "#1a0929",
   bgGradientDir: "135deg",
   bgImageUrl: "",
+  bgFit: "contain",
+  bgOverlay: 0.62,
+  appointmentOpacity: 0.33,
+  appointmentTextContrast: 0.8,
 };
 
 const GRADIENT_PRESETS = [
@@ -70,7 +78,7 @@ const GRADIENT_PRESETS = [
 ];
 
 const ACCENT_COLORS = [
-  "#ec4899", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b",
+  "#c9a45c", "#ec4899", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b",
   "#ef4444", "#3b82f6", "#84cc16", "#f97316", "#6366f1",
 ];
 
@@ -427,9 +435,9 @@ export default function ConfiguracoesPage() {
             </Label>
 
             {/* Tipo de fundo */}
-            <div className="grid grid-cols-3 gap-2">
-              {(["default", "solid", "gradient", "image"] as BgType[]).map(type => {
-                const labels = { default: "Padrão", solid: "Cor sólida", gradient: "Gradiente", image: "Imagem" };
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {(["default", "rosa-wallpaper", "solid", "gradient", "image"] as BgType[]).map(type => {
+                const labels = { default: "Padrão", "rosa-wallpaper": "Rosa de Sarom", solid: "Cor sólida", gradient: "Gradiente", image: "Imagem" };
                 return (
                   <button key={type} type="button"
                     onClick={() => updateConfig("bgType", type)}
@@ -444,6 +452,33 @@ export default function ConfiguracoesPage() {
                 );
               })}
             </div>
+
+            {config.bgType === "rosa-wallpaper" && (
+              <div className="space-y-4 rounded-xl border border-primary/20 bg-primary/5 p-4">
+                <div className="flex items-center gap-3">
+                  <img src="/wallpapers/rosa-sarom-wallpaper.jpg" alt="Prévia do wallpaper Rosa de Sarom" className="h-20 w-16 rounded-lg object-cover border border-primary/30" />
+                  <div>
+                    <p className="text-sm font-semibold">Wallpaper Rosa de Sarom</p>
+                    <p className="text-xs text-muted-foreground">Use a imagem da marca como fundo do aplicativo.</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Enquadramento</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[{ value: "contain", label: "Imagem inteira" }, { value: "cover", label: "Preencher tela" }].map(option => (
+                      <button key={option.value} type="button" onClick={() => updateConfig("bgFit", option.value)}
+                        className={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${config.bgFit === option.value ? "border-primary bg-primary/20 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between"><Label className="text-xs text-muted-foreground">Escurecimento do fundo</Label><span className="text-xs text-primary">{Math.round(config.bgOverlay * 100)}%</span></div>
+                  <input type="range" min="25" max="90" step="1" value={Math.round(config.bgOverlay * 100)} onChange={e => updateConfig("bgOverlay", Number(e.target.value) / 100)} className="w-full accent-primary" />
+                </div>
+              </div>
+            )}
 
             {/* Cor sólida */}
             {config.bgType === "solid" && (
@@ -538,6 +573,23 @@ export default function ConfiguracoesPage() {
                 <input ref={bgImgInputRef} type="file" accept="image/png,image/jpeg,image/webp" style={{ display: "none" }} onChange={handleBgImageSelect} />
               </div>
             )}
+
+            <Separator />
+
+            <div className="space-y-4">
+              <div>
+                <Label>Legibilidade dos agendamentos</Label>
+                <p className="text-[11px] text-muted-foreground mt-1">Ajuste a solidez dos cards e o brilho dos textos na Agenda.</p>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between"><Label className="text-xs text-muted-foreground">Opacidade dos cards</Label><span className="text-xs text-primary">{Math.round(config.appointmentOpacity * 100)}%</span></div>
+                <input type="range" min="15" max="80" step="1" value={Math.round(config.appointmentOpacity * 100)} onChange={e => updateConfig("appointmentOpacity", Number(e.target.value) / 100)} className="w-full accent-primary" />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between"><Label className="text-xs text-muted-foreground">Contraste dos detalhes</Label><span className="text-xs text-primary">{Math.round(config.appointmentTextContrast * 100)}%</span></div>
+                <input type="range" min="45" max="100" step="1" value={Math.round(config.appointmentTextContrast * 100)} onChange={e => updateConfig("appointmentTextContrast", Number(e.target.value) / 100)} className="w-full accent-primary" />
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

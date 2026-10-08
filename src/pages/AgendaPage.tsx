@@ -225,6 +225,8 @@ const AppointmentBlock = memo(function AppointmentBlock({
   onClick,
   onDragStart,
   startHour,
+  cardOpacity,
+  textContrast,
 }: {
   appt: Appointment;
   color: string;
@@ -233,6 +235,8 @@ const AppointmentBlock = memo(function AppointmentBlock({
   onClick: () => void;
   onDragStart: (appt: Appointment, y: number, x: number) => void;
   startHour: number;
+  cardOpacity: number;
+  textContrast: number;
 }) {
   const start  = new Date(appt.startTime);
   const end    = new Date(appt.endTime);
@@ -331,7 +335,7 @@ const AppointmentBlock = memo(function AppointmentBlock({
         height: `${height}px`,
         left: "3px",
         right: "3px",
-        backgroundColor: color + "25",
+        backgroundColor: color + Math.round(cardOpacity * 255).toString(16).padStart(2, "0"),
         borderLeft: `3px solid ${color}`,
         zIndex: 10,
         touchAction: "none",
@@ -368,18 +372,18 @@ const AppointmentBlock = memo(function AppointmentBlock({
       </div>
       {/* Nome do cliente (secundário) */}
       {height > 36 && !isBlocked && (
-        <p className="text-[10px] text-muted-foreground truncate leading-tight">
+        <p className="text-[10px] truncate leading-tight" style={{ color: `rgba(255,255,255,${textContrast})` }}>
           {appt.clientName ?? "Sem nome"}
         </p>
       )}
       {height > 52 && !isBlocked && (
-        <p className="text-xs text-muted-foreground flex items-center gap-0.5">
-          <Clock className="w-2.5 h-2.5" />
+        <p className="text-xs flex items-center gap-0.5" style={{ color: `rgba(255,255,255,${textContrast})` }}>
+          <Clock className="w-2.5 h-2.5" style={{ opacity: Math.min(1, textContrast + 0.1) }} />
           {format(start, "HH:mm")}–{format(end, "HH:mm")}
         </p>
       )}
       {height > 70 && !isBlocked && appt.totalPrice != null && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs" style={{ color: `rgba(255,255,255,${textContrast})` }}>
           R$ {appt.totalPrice.toFixed(2)}
         </p>
       )}
@@ -398,6 +402,8 @@ const EmployeeColumn = memo(function EmployeeColumn({
   onAppointmentClick,
   onDragStart,
   startHour,
+  cardOpacity,
+  textContrast,
   totalHours,
   snapMinutes,
 }: {
@@ -410,6 +416,8 @@ const EmployeeColumn = memo(function EmployeeColumn({
   onAppointmentClick: (appt: Appointment) => void;
   onDragStart: (appt: Appointment, y: number, x: number) => void;
   startHour: number;
+  cardOpacity: number;
+  textContrast: number;
   totalHours: number;
   snapMinutes: number;
 }) {
@@ -461,6 +469,8 @@ const EmployeeColumn = memo(function EmployeeColumn({
             onClick={() => onAppointmentClick(appt)}
             onDragStart={onDragStart}
             startHour={startHour}
+            cardOpacity={cardOpacity}
+            textContrast={textContrast}
           />
         );
       })}
@@ -469,6 +479,27 @@ const EmployeeColumn = memo(function EmployeeColumn({
 });
 
 // ─── useAccentColor — lê a cor de acento do salon_config ─────────────────────
+function useAppointmentAppearance(): { cardOpacity: number; textContrast: number } {
+  const read = () => {
+    try {
+      const config = JSON.parse(localStorage.getItem("salon_config") || "{}");
+      return {
+        cardOpacity: Math.max(0.15, Math.min(0.8, Number(config.appointmentOpacity ?? 0.33))),
+        textContrast: Math.max(0.45, Math.min(1, Number(config.appointmentTextContrast ?? 0.8))),
+      };
+    } catch {
+      return { cardOpacity: 0.33, textContrast: 0.8 };
+    }
+  };
+  const [appearance, setAppearance] = useState(read);
+  useEffect(() => {
+    const onUpdate = () => setAppearance(read());
+    window.addEventListener("salon_config_updated", onUpdate);
+    return () => window.removeEventListener("salon_config_updated", onUpdate);
+  }, []);
+  return appearance;
+}
+
 function useAccentColor(): string {
   const [accent, setAccent] = useState(() => {
     try {
@@ -560,6 +591,7 @@ function DragGhost({ appt, x, y }: { appt: Appointment; x: number; y: number }) 
 // ─── AgendaPage ───────────────────────────────────────────────────────────────
 export default function AgendaPage() {
   const search = useSearch();
+  const appointmentAppearance = useAppointmentAppearance();
   const [selectedDate, setSelectedDate]   = useState(() => {
     const params = new URLSearchParams(search);
     const d = params.get("date");
@@ -1100,6 +1132,8 @@ export default function AgendaPage() {
                     onAppointmentClick={openEdit}
                     onDragStart={handleDragStart}
                     startHour={START_HOUR}
+                    cardOpacity={appointmentAppearance.cardOpacity}
+                    textContrast={appointmentAppearance.textContrast}
                     totalHours={TOTAL_HOURS}
                     snapMinutes={SNAP_MINUTES}
                   />

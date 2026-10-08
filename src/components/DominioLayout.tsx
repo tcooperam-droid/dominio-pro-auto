@@ -55,6 +55,18 @@ function loadBackground(): React.CSSProperties {
     const s = localStorage.getItem("salon_config");
     if (!s) return {};
     const c = JSON.parse(s);
+    if (c.bgType === "rosa-wallpaper") {
+      const wallpaper = "/wallpapers/rosa-sarom-wallpaper.jpg?v=rosa-20261008";
+      const overlay = Math.max(0.25, Math.min(0.9, Number(c.bgOverlay ?? 0.62)));
+      return {
+        backgroundColor: "#080a10",
+        backgroundImage: `linear-gradient(rgba(5, 7, 11, ${overlay}), rgba(5, 7, 11, ${Math.min(0.95, overlay + 0.16)})), url(${wallpaper})`,
+        backgroundSize: c.bgFit === "cover" ? "cover" : "contain",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "center",
+        backgroundAttachment: "fixed",
+      };
+    }
     if (c.bgType === "solid" && c.bgColor)
       return { backgroundColor: c.bgColor };
     if (c.bgType === "gradient" && c.bgGradientFrom && c.bgGradientTo)
@@ -79,6 +91,18 @@ export const THEME_PALETTES = [
     dark: true,
     textColor: "#ffffff",
     textMuted: "rgba(255,255,255,0.45)",
+  },
+  {
+    id: "rosa-sarom",
+    name: "Rosa de Sarom",
+    accent: "#c9a45c",
+    bg: "#0b0d12",
+    surface: "rgba(11,13,18,0.96)",
+    card: "rgba(24,24,29,0.92)",
+    border: "rgba(201,164,92,0.2)",
+    dark: true,
+    textColor: "#fffaf0",
+    textMuted: "rgba(246,230,193,0.5)",
   },
   {
     id: "roxo-galaxy",
