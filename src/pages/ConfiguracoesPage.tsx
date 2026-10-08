@@ -12,10 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Settings, Building2, Clock, Bell, Palette, Save, ImagePlus, Trash2, Scissors, Monitor, Zap, Shield, Eye, EyeOff, Wrench, Percent, Brain, CheckCircle2, XCircle } from "lucide-react";
-import { employeesStore } from "@/features/funcionarios";
+import { Settings, Building2, Clock, Palette, Save, ImagePlus, Trash2, Scissors, Monitor, Shield, Eye, EyeOff } from "lucide-react";
 import { applyAccentColor } from "@/contexts/ThemeContext";
-import { testAgentV2Connection, initAgentV2 } from "@/lib/agentV2";
 
 type BgType = "default" | "solid" | "gradient" | "image" | "rosa-wallpaper";
 
@@ -83,53 +81,6 @@ const ACCENT_COLORS = [
 ];
 
 export default function ConfiguracoesPage() {
-  const [fixingWH, setFixingWH] = useState(false);
-  const [agentTest, setAgentTest] = useState<"idle" | "testing" | "ok" | "error">("idle");
-  const [agentTestMsg, setAgentTestMsg] = useState("");
-
-  const handleTestAgent = async () => {
-    setAgentTest("testing");
-    try {
-      const result = await testAgentV2Connection();
-      setAgentTest(result.ok ? "ok" : "error");
-      setAgentTestMsg(result.message);
-      if (result.ok) {
-        initAgentV2({
-          apiToken: "",
-          apiEndpoint: "/api/agent",
-          model: "gpt-5-mini",
-          salonName: config.salonName,
-        });
-      }
-    } catch (err: any) {
-      setAgentTest("error");
-      setAgentTestMsg(err?.message ?? "Erro ao testar");
-    }
-  };
-
-  const handleFixWorkingHours = async () => {
-    setFixingWH(true);
-    try {
-      const schedules: Record<number, Record<string, {start:string;end:string;active:boolean}>> = {
-        1: { seg:{start:"07:00",end:"18:00",active:false}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:false}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
-        2: { seg:{start:"07:00",end:"18:00",active:false}, ter:{start:"07:00",end:"18:00",active:false}, qua:{start:"07:00",end:"18:00",active:false}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
-        3: { seg:{start:"07:00",end:"18:00",active:true}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:true}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
-        4: { seg:{start:"07:00",end:"18:00",active:true}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:true}, qui:{start:"07:00",end:"18:00",active:false}, sex:{start:"07:00",end:"18:00",active:false}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
-        5: { seg:{start:"07:00",end:"18:00",active:true}, ter:{start:"07:00",end:"18:00",active:true}, qua:{start:"07:00",end:"18:00",active:true}, qui:{start:"07:00",end:"18:00",active:true}, sex:{start:"07:00",end:"18:00",active:true}, sab:{start:"07:00",end:"18:00",active:true}, dom:{start:"07:00",end:"18:00",active:false} },
-      };
-      let count = 0;
-      for (const [id, wh] of Object.entries(schedules)) {
-        await employeesStore.update(Number(id), { workingHours: wh });
-        count++;
-      }
-      toast.success(`Horários corrigidos para ${count} funcionários!`);
-    } catch (err: any) {
-      toast.error("Erro ao corrigir horários: " + (err?.message ?? "tente novamente"));
-    } finally {
-      setFixingWH(false);
-    }
-  };
-
   const [config, setConfig] = useState<SalonConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(false);
   const logoInputRef  = useRef<HTMLInputElement>(null);
@@ -309,38 +260,6 @@ export default function ConfiguracoesPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* Automação */}
-      <Card className="border-border bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Zap className="w-4 h-4 text-primary" />Automação
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Abertura automática do caixa</p>
-              <p className="text-xs text-muted-foreground">Abrir o caixa automaticamente ao iniciar o app (com saldo do dia anterior)</p>
-            </div>
-            <Switch checked={config.autoOpenCash} onCheckedChange={v => updateConfig("autoOpenCash", v)} />
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Notificação por E-mail</p>
-              <p className="text-xs text-muted-foreground">Enviar confirmações por e-mail (requer integração SMTP)</p>
-            </div>
-            <Switch checked={config.notifyEmail} onCheckedChange={v => updateConfig("notifyEmail", v)} />
-          </div>
-        </CardContent>
-      </Card>
-
-
-
-
-
-
 
       {/* Appearance */}
       <Card className="border-border bg-card/50">
@@ -690,71 +609,6 @@ export default function ConfiguracoesPage() {
           <Button onClick={handleSaveAccess} className="w-full gap-2 mt-2" variant="secondary">
             <Save className="w-4 h-4" />Salvar Senhas e Acessos
           </Button>
-        </CardContent>
-      </Card>
-
-      {/* Agente IA */}
-      <Card className="border-border bg-card/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Brain className="w-4 h-4 text-primary" />Agente IA
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-xs text-muted-foreground">
-            O Agente IA usa exclusivamente o proxy seguro da Vercel. A chave do
-            provedor nunca é solicitada nem armazenada neste navegador.
-          </p>
-          <div className="flex items-center gap-3 flex-wrap">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleTestAgent}
-              disabled={agentTest === "testing"}
-              className="gap-2"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              {agentTest === "testing" ? "Testando..." : "Testar conexão"}
-            </Button>
-            {agentTest === "ok" && (
-              <span className="flex items-center gap-1 text-xs text-emerald-400">
-                <CheckCircle2 className="w-3.5 h-3.5" />{agentTestMsg}
-              </span>
-            )}
-            {agentTest === "error" && (
-              <span className="flex items-center gap-1 text-xs text-red-400">
-                <XCircle className="w-3.5 h-3.5" />{agentTestMsg}
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            O teste verifica a sessão autenticada e a disponibilidade do serviço privado.
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Correção de Horários */}
-      <Card className="border-border bg-card/30">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Wrench className="w-4 h-4 text-primary" />Manutenção
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div>
-            <p className="text-xs text-muted-foreground mb-2">Corrige os horários de trabalho de todos os funcionários no banco de dados.</p>
-            <Button
-              onClick={handleFixWorkingHours}
-              disabled={fixingWH}
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
-              <Wrench className="w-3.5 h-3.5 mr-2" />
-              {fixingWH ? "Corrigindo..." : "Corrigir horários dos funcionários"}
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
