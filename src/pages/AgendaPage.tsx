@@ -10,7 +10,7 @@ import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Plus, Calendar, CalendarDays, RefreshCw, Clock, Link2, Search, Undo2, Redo2, Lock, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar, CalendarDays, Clock, Link2, Search, Undo2, Redo2, Lock, Trash2 } from "lucide-react";
 import { Calendar as CalendarUI } from "@/components/ui/calendar";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -605,7 +605,6 @@ export default function AgendaPage() {
   const [groupClientName, setGroupClientName] = useState<string | undefined>();
   const [groupId, setGroupId]             = useState<string | undefined>();
   const [refreshKey, setRefreshKey]       = useState(0);
-  const [refreshing, setRefreshing]       = useState(false);
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [editingBlock, setEditingBlock] = useState<Appointment | null>(null);
 
@@ -701,19 +700,6 @@ export default function AgendaPage() {
       window.removeEventListener("store_updated", onStoreUpdate);
       window.removeEventListener("appointments_updated", onStoreUpdate);
     };
-  }, []);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      // Rebusca todos os dados do Supabase sem recarregar a página
-      await fetchAllData();
-      setRefreshKey(k => k + 1);
-    } catch (err) {
-      console.error("Erro ao atualizar:", err);
-    } finally {
-      setRefreshing(false);
-    }
   }, []);
 
   // Horários/slots dinâmicos vindos de Configurações
@@ -1037,9 +1023,6 @@ export default function AgendaPage() {
           >
             <Redo2 className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleRefresh} disabled={refreshing} className="h-8 w-8" title="Atualizar">
-            <RefreshCw className={cn("w-3 h-3", refreshing && "animate-spin")} />
-          </Button>
           <Button
             variant="outline" size="sm" onClick={openNewBlock}
             className="gap-1 h-8 text-xs bg-transparent border-amber-500/40 text-amber-300 hover:bg-amber-500/10"
@@ -1051,15 +1034,6 @@ export default function AgendaPage() {
           <Badge variant="secondary" className="text-xs hidden md:inline-flex">
             {completedCount}/{appointments.length}
           </Badge>
-          <Button
-            size="sm"
-            onClick={() => { capturePending(); setShowPackages(true); setEditingAppt(null); setDefaultEmpId(undefined); setGroupClientName(undefined); setGroupId(undefined); setModalOpen(true); }}
-            className="gap-1 h-8 text-xs md:text-sm"
-          >
-            <Plus className="w-3 h-3" />
-            <span className="hidden md:inline">Novo Agendamento</span>
-            <span className="md:hidden">+</span>
-          </Button>
         </div>
       </div>
 
