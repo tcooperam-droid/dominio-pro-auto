@@ -935,8 +935,8 @@ export default function AgendaPage() {
     <div className="flex flex-col h-full" style={{ userSelect: dragging ? "none" : undefined }}>
 
       {/* ── Header ── */}
-      <div className="flex items-center gap-2 md:gap-3 px-3 md:px-6 py-2 md:py-3 border-b border-border bg-card/30 backdrop-blur-sm flex-wrap">
-        <div className="flex items-center gap-1 md:gap-2">
+      <div className="flex items-center gap-1.5 md:gap-3 px-2 md:px-6 py-2 md:py-3 border-b border-border bg-card/30 backdrop-blur-sm flex-nowrap overflow-x-auto">
+        <div className="flex items-center gap-1 md:gap-2 min-w-0 flex-1">
           <Button variant="outline" size="icon" onClick={() => navigateDate(-1)} className="h-8 w-8 bg-transparent">
             <ChevronLeft className="w-3 h-3" />
           </Button>
@@ -945,7 +945,7 @@ export default function AgendaPage() {
           <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
             <PopoverTrigger asChild>
               <div className="flex items-center gap-2 min-w-0 px-3 py-1.5 rounded-lg bg-gradient-to-r from-primary/15 to-primary/5 border border-primary/40 cursor-pointer hover:border-primary/70 hover:from-primary/20 hover:to-primary/10 transition-all shadow-sm">
-                <span className="text-xs md:text-sm font-bold text-primary capitalize truncate max-w-[140px] md:max-w-none">
+                <span className="text-xs md:text-sm font-bold text-primary capitalize truncate max-w-[112px] md:max-w-none">
                   {formattedDate}
                 </span>
                 <Calendar className="w-4 h-4 text-primary flex-shrink-0" />
@@ -1003,7 +1003,7 @@ export default function AgendaPage() {
           </Button>
         </div>
 
-        <div className="flex items-center gap-1.5 ml-auto">
+        <div className="flex items-center gap-0.5 md:gap-1.5 ml-0 flex-shrink-0">
           {/* Undo / Redo */}
           <Button
             variant="ghost" size="icon"
