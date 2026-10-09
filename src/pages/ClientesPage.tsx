@@ -14,7 +14,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
-  Plus, Pencil, Trash2, Users, Phone, Mail, Search, ChevronRight, RefreshCw,
+  Plus, Pencil, Trash2, Users, Phone, Mail, Search, ChevronRight, RefreshCw, MessageCircle,
 } from "lucide-react";
 import { clientsStore, type Client } from "@/features/clientes";
 import { appointmentsStore } from "@/features/agenda";
@@ -190,6 +190,18 @@ export default function ClientesPage() {
     }
   };
 
+  const handleOpenWhatsApp = (client: Client) => {
+    const digits = (client.phone ?? "").replace(/\D/g, "");
+    if (digits.length < 10) {
+      toast.error("Cadastre um telefone válido para abrir o WhatsApp");
+      return;
+    }
+
+    // O WhatsApp exige o código do país. Números brasileiros locais recebem +55.
+    const whatsappNumber = digits.startsWith("55") ? digits : `55${digits}`;
+    window.open(`https://wa.me/${whatsappNumber}`, "_blank", "noopener,noreferrer");
+  };
+
   const handleDelete = async (id: number) => {
     if (!confirm("Excluir este cliente?")) return;
     try {
@@ -282,6 +294,18 @@ export default function ClientesPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
+                  {client.phone && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="w-8 h-8 text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10"
+                      onClick={e => { e.stopPropagation(); handleOpenWhatsApp(client); }}
+                      aria-label={`Abrir WhatsApp de ${client.name}`}
+                      title="Abrir WhatsApp"
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="w-8 h-8" onClick={e => { e.stopPropagation(); openEdit(client); }}>
                     <Pencil className="w-3.5 h-3.5" />
                   </Button>
