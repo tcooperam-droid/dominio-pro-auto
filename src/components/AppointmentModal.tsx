@@ -12,7 +12,6 @@ import { safeFmt } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -32,15 +31,6 @@ import {
   refreshAppointmentService,
   toCurrentAppointmentService,
 } from "@/lib/serviceSuggestions";
-
-const STATUS_OPTIONS = [
-  { value: "scheduled",   label: "Agendado"       },
-  { value: "confirmed",   label: "Confirmado"      },
-  { value: "in_progress", label: "Em andamento"    },
-  { value: "completed",   label: "Concluído"       },
-  { value: "cancelled",   label: "Cancelado"       },
-  { value: "no_show",     label: "Não compareceu"  },
-];
 
 interface SelectedService {
   serviceId: number;
@@ -804,34 +794,6 @@ export default function AppointmentModal({
               </div>
             </div>
           )}
-
-          <Separator />
-
-          {/* Status + Notes */}
-          {isEditing && (
-            <div className="space-y-3 border-t border-border/60 pt-4">
-              <div>
-                <p className="text-sm font-semibold">Detalhes do agendamento</p>
-                <p className="text-[11px] text-muted-foreground">Use o status apenas quando estiver editando um registro existente.</p>
-              </div>
-              <div className="space-y-1">
-                <Label>Status</Label>
-                <Select value={status} onValueChange={setStatus}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {STATUS_OPTIONS.map(opt => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
-          <div className="space-y-1">
-            <Label>Observações <span className="font-normal text-muted-foreground">(opcional)</span></Label>
-            <Textarea value={notes} onChange={e => setNotes(e.target.value)}
-              placeholder="Preferências, observações..." rows={2} />
-          </div>
 
           {/* Group siblings */}
           {groupSiblings.length > 0 && (
