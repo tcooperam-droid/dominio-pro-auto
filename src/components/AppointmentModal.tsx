@@ -20,7 +20,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Plus, Trash2, Clock, DollarSign, X, Link2, UserPlus, Search, RotateCcw, History, Sparkles, Package } from "lucide-react";
+import { Plus, Trash2, Clock, DollarSign, X, Link2, UserPlus, Search, RotateCcw, History, Sparkles, Package, MessageCircle } from "lucide-react";
 import { employeesStore } from "@/features/funcionarios";
 import { servicesStore, servicePackagesStore, type ServicePackage } from "@/features/servicos";
 import { appointmentsStore, type Appointment, type AppointmentService } from "@/features/agenda";
@@ -328,6 +328,30 @@ export default function AppointmentModal({
     }
   };
 
+  const handleOpenAppointmentWhatsApp = () => {
+    const selectedClient = clientId ? allClients.find(client => client.id === clientId) : null;
+    const phone = selectedClient?.phone ?? newClientPhone;
+    const digits = phone.replace(/\D/g, "");
+    if (digits.length < 10) {
+      toast.error("Este cliente não possui um telefone válido cadastrado");
+      return;
+    }
+
+    const whatsappNumber = digits.startsWith("55") ? digits : `55${digits}`;
+    const dateLabel = format(parseISO(apptDate), "dd/MM/yyyy");
+    const message = `Olá, ${clientName.trim()}! Lembrando do seu agendamento para ${dateLabel}, às ${startTime}.`;
+    const encodedMessage = encodeURIComponent(message);
+    const userAgent = navigator.userAgent.toLowerCase();
+
+    if (/android/.test(userAgent)) {
+      window.location.href = `intent://send?phone=${whatsappNumber}&text=${encodedMessage}#Intent;scheme=whatsapp;package=com.whatsapp.w4b;end`;
+    } else if (/iphone|ipad|ipod/.test(userAgent)) {
+      window.location.href = `whatsapp-business://send?phone=${whatsappNumber}&text=${encodedMessage}`;
+    } else {
+      window.open(`https://wa.me/${whatsappNumber}?text=${encodedMessage}`, "_blank", "noopener,noreferrer");
+    }
+  };
+
   const handleCreateNewClient = async () => {
     if (!clientName.trim()) { toast.error("Nome do cliente é obrigatório"); return; }
     try {
@@ -515,12 +539,27 @@ export default function AppointmentModal({
                         <p className="text-sm font-medium text-foreground">{clientName}</p>
                         <p className="text-xs text-muted-foreground">ID: {clientId}</p>
                       </div>
-                      <button
-                        onClick={() => { setClientId(null); setClientName(""); setClientSearch(""); }}
-                        className="text-muted-foreground hover:text-destructive transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {(allClients.find(client => client.id === clientId)?.phone || newClientPhone) && (
+                          <button
+                            type="button"
+                            onClick={handleOpenAppointmentWhatsApp}
+                            className="rounded-md p-1 text-emerald-500 transition-colors hover:bg-emerald-500/10 hover:text-emerald-400"
+                            aria-label={`Enviar lembrete de agendamento para ${clientName}`}
+                            title="Enviar lembrete pelo WhatsApp Business"
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => { setClientId(null); setClientName(""); setClientSearch(""); }}
+                          className="text-muted-foreground hover:text-destructive transition-colors"
+                          aria-label="Remover cliente selecionado"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
                     {/* Card de histórico do cliente */}
                     {(() => {
