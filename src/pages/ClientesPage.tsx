@@ -193,13 +193,25 @@ export default function ClientesPage() {
   const handleOpenWhatsApp = (client: Client) => {
     const digits = (client.phone ?? "").replace(/\D/g, "");
     if (digits.length < 10) {
-      toast.error("Cadastre um telefone válido para abrir o WhatsApp");
+      toast.error("Cadastre um telefone válido para abrir o WhatsApp Business");
       return;
     }
 
     // O WhatsApp exige o código do país. Números brasileiros locais recebem +55.
     const whatsappNumber = digits.startsWith("55") ? digits : `55${digits}`;
-    window.open(`https://wa.me/${whatsappNumber}`, "_blank", "noopener,noreferrer");
+    const businessUrl = `whatsapp-business://send?phone=${whatsappNumber}`;
+    const userAgent = navigator.userAgent.toLowerCase();
+
+    if (/android/.test(userAgent)) {
+      // Package oficial do WhatsApp Business no Android.
+      window.location.href = `intent://send?phone=${whatsappNumber}#Intent;scheme=whatsapp;package=com.whatsapp.w4b;end`;
+    } else if (/iphone|ipad|ipod/.test(userAgent)) {
+      // Esquema do WhatsApp Business no iOS.
+      window.location.href = businessUrl;
+    } else {
+      // Fallback para desktop ou navegador que não informa o sistema operacional.
+      window.open(`https://wa.me/${whatsappNumber}`, "_blank", "noopener,noreferrer");
+    }
   };
 
   const handleDelete = async (id: number) => {
