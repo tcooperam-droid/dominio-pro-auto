@@ -180,23 +180,23 @@ export default function FuncionariosPage() {
             <Card key={emp.id} className={`border-border bg-card/50 overflow-hidden ${!emp.active ? "opacity-50" : ""}`}>
               <div className="h-1.5" style={{ backgroundColor: emp.color }} />
               <CardHeader className="pb-2">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <Avatar className="w-10 h-10" style={{ boxShadow: `0 0 0 2px ${emp.color}55` }}>
                     {emp.photoUrl && <AvatarImage src={emp.photoUrl} alt={emp.name} />}
                     <AvatarFallback style={{ backgroundColor: emp.color, color: "#fff" }} className="font-bold text-sm">
                       {emp.name.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-sm truncate">{emp.name}</h3>
+                  <div className="flex-[1_1_160px] min-w-[160px]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <h3 className="min-w-0 truncate font-semibold text-sm" title={emp.name}>{emp.name}</h3>
                       {!emp.active && <Badge variant="secondary" className="text-[10px]">Inativo</Badge>}
                     </div>
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Percent className="w-3 h-3" />{emp.commissionPercent}% comissão
                     </div>
                   </div>
-                  <div className="flex flex-wrap justify-end gap-1">
+                  <div className="flex w-full flex-wrap justify-end gap-1 sm:ml-auto sm:w-auto">
                     <Button variant="ghost" size="sm" className="h-7 gap-1 px-2 text-xs" onClick={() => openEdit(emp)}>
                       <Pencil className="w-3.5 h-3.5" />Editar
                     </Button>
