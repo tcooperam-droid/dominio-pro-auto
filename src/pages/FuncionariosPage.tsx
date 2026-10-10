@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Pencil, Trash2, UserCheck, UserX, Phone, Mail, Percent, Camera, X as XIcon, Loader2, RotateCcw } from "lucide-react";
+import { Plus, Pencil, Trash2, UserCheck, UserX, Phone, Mail, Percent, Camera, ImagePlus, X as XIcon, Loader2, RotateCcw } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { employeesStore, type Employee } from "@/features/funcionarios";
 import { supabase } from "@/lib/supabase";
@@ -47,6 +47,7 @@ export default function FuncionariosPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showInactive, setShowInactive] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const employees = useMemo(
     () => employeesStore.list(false).filter(employee => showInactive || employee.active),
@@ -246,7 +247,9 @@ export default function FuncionariosPage() {
       <Dialog open={modalOpen} onOpenChange={v => !v && setModalOpen(false)}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Editar Funcionário" : "Novo Funcionário"}</DialogTitle>
+            <DialogTitle>
+              {editingId ? `Editar Funcionário — ${form.name || "Funcionário"}` : "Novo Funcionário"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-3">
@@ -283,19 +286,31 @@ export default function FuncionariosPage() {
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col gap-2 flex-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="gap-2 w-full"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      {uploading
-                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Enviando...</>
-                        : <><Camera className="w-3.5 h-3.5" /> {form.photoUrl ? "Trocar foto" : "Escolher foto"}</>
-                      }
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 w-full"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                      >
+                        {uploading
+                          ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Enviando...</>
+                          : <><ImagePlus className="w-3.5 h-3.5" /> Arquivo</>
+                        }
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 w-full"
+                        onClick={() => cameraInputRef.current?.click()}
+                        disabled={uploading}
+                      >
+                        <Camera className="w-3.5 h-3.5" /> Câmera
+                      </Button>
+                    </div>
                     {form.photoUrl && (
                       <Button
                         type="button"
@@ -307,11 +322,18 @@ export default function FuncionariosPage() {
                         <XIcon className="w-3.5 h-3.5" /> Remover foto
                       </Button>
                     )}
-                    <p className="text-xs text-muted-foreground">JPG, PNG ou WebP · máx. 5MB</p>
+                    <p className="text-xs text-muted-foreground">Escolha um arquivo do celular ou use a câmera · JPG, PNG ou WebP · máx. 5MB</p>
                   </div>
                 </div>
                 <input
                   ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handlePhotoUpload}
+                />
+                <input
+                  ref={cameraInputRef}
                   type="file"
                   accept="image/*"
                   capture="environment"
